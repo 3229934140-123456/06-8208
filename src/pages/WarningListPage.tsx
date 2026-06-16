@@ -78,6 +78,31 @@ const warningStatusMap: Record<WarningStatus, { label: string; color: string }> 
   escalating: { label: '升级中', color: 'warning-high' },
 };
 
+function getWarningStatusDisplay(warning: WarningRecord): { label: string; color: string } {
+  if (warning.level === 1) {
+    return warningStatusMap[warning.status];
+  }
+
+  if (warning.status === 'rejected') {
+    return { label: '已驳回', color: 'risk-medium' };
+  }
+  if (warning.status === 'resolved') {
+    return { label: '已处置', color: 'primary' };
+  }
+  if (warning.status === 'approved' || warning.approvalStage === 4) {
+    return { label: '审批通过', color: 'mint' };
+  }
+
+  const stage = warning.approvalStage || 0;
+  const stageLabels: Record<number, { label: string; color: string }> = {
+    1: { label: '待辅导员确认', color: 'warning-low' },
+    2: { label: '待联络员复核', color: 'warning-low' },
+    3: { label: '待中心批准', color: 'warning-low' },
+  };
+
+  return stageLabels[stage] || warningStatusMap[warning.status];
+}
+
 function getRiskBadgeColor(level: RiskLevel): 'risk-safe' | 'risk-low' | 'risk-medium' | 'risk-high' {
   switch (level) {
     case 'safe': return 'risk-safe';
@@ -514,8 +539,8 @@ export default function WarningListPage() {
                             {new Date(warning.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                           </td>
                           <td className="px-4 py-3.5">
-                            <Badge color={warningStatusMap[warning.status].color as any} size="sm">
-                              {warningStatusMap[warning.status].label}
+                            <Badge color={getWarningStatusDisplay(warning).color as any} size="sm">
+                              {getWarningStatusDisplay(warning).label}
                             </Badge>
                           </td>
                           <td className="px-4 py-3.5">

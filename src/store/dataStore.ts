@@ -69,6 +69,7 @@ export interface UploadRecord {
   successCount: number
   failCount: number
   skipCount: number
+  focusCount: number
   operator: string
 }
 
@@ -390,9 +391,9 @@ export const useDataStore = create<DataState>()(
                   level: 2,
                   escalating: true,
                   escalatedAt: now,
-                  approvalStage: 0,
-                  status: 'pending',
-                  statusText: '待处理',
+                  approvalStage: 1,
+                  status: 'processing',
+                  statusText: '待辅导员确认',
                   approvals: [],
                   updatedAt: now,
                 }
@@ -437,9 +438,7 @@ export const useDataStore = create<DataState>()(
         if (!warning) return false
 
         const currentStage = warning.approvalStage || 0
-        if (stage !== currentStage + 1 && !(stage === 1 && currentStage === 0)) {
-          if (stage > currentStage + 1) return false
-        }
+        if (stage !== currentStage) return false
 
         const now = formatDateStr(new Date())
         const approvalRecord = {
@@ -455,19 +454,23 @@ export const useDataStore = create<DataState>()(
           createdAt: now,
         }
 
-        let newStage: 0 | 1 | 2 | 3 = currentStage as 0 | 1 | 2 | 3
+        let newStage: 0 | 1 | 2 | 3 | 4 = currentStage
         let newStatus: WarningStatus = warning.status
         let newStatusText = warning.statusText
 
         if (approved) {
           if (stage >= 3) {
-            newStage = 3
+            newStage = 4
             newStatus = 'approved'
             newStatusText = '审批通过'
           } else {
-            newStage = (stage + 1) as 1 | 2 | 3
+            newStage = (stage + 1) as 2 | 3
             newStatus = 'processing'
-            newStatusText = '处理中'
+            const nextStageNames: Record<number, string> = {
+              2: '待联络员复核',
+              3: '待中心批准',
+            }
+            newStatusText = nextStageNames[newStage] || '处理中'
           }
         } else {
           newStatus = 'rejected'
@@ -911,6 +914,8 @@ export const useDataStore = create<DataState>()(
 
         const studentWarnings = warnings.filter((w) => w.studentId === studentId)
         if (studentWarnings.length >= 2) return true
+
+        if (student.warningCount >= 2) return true
 
         const hasSevereAssessment = student.assessmentHistory.some((a) =>
           Object.values(a.dimensions).some((d) => d.level === '重度')

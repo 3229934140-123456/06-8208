@@ -693,11 +693,33 @@ export function generateWarnings(
       escalating: '升级中',
     };
 
-    const approvalStage: 0 | 1 | 2 | 3 =
-      status === 'pending' ? 0 :
-      status === 'processing' ? (randomInt(1, 2, rand) as 1 | 2) :
-      status === 'approved' ? 3 :
-      status === 'resolved' ? 3 : randomInt(1, 3, rand) as 1 | 2 | 3;
+    let approvalStage: 0 | 1 | 2 | 3 | 4 = 0;
+    let statusText = statusTextMap[status];
+
+    if (level === 2) {
+      if (status === 'pending') {
+        approvalStage = 1;
+        status = 'processing';
+        statusText = '待辅导员确认';
+      } else if (status === 'processing') {
+        approvalStage = randomInt(1, 2, rand) as 1 | 2;
+        const stageTexts: Record<number, string> = {
+          1: '待辅导员确认',
+          2: '待联络员复核',
+          3: '待中心批准',
+        };
+        statusText = stageTexts[approvalStage] || '处理中';
+      } else if (status === 'approved') {
+        approvalStage = 4;
+        statusText = '审批通过';
+      } else if (status === 'resolved') {
+        approvalStage = 4;
+      } else if (status === 'rejected') {
+        approvalStage = randomInt(1, 3, rand) as 1 | 2 | 3;
+      }
+    } else {
+      approvalStage = 0;
+    }
 
     const approvals = approvalStage > 0 ? generateApprovals(`WRN${String(i + 1).padStart(5, '0')}`, approvalStage, status, createdAt, rand) : [];
     const interventions = (status === 'processing' || status === 'approved' || status === 'resolved')
@@ -729,7 +751,7 @@ export function generateWarnings(
       updatedAt: formatDateStr(updatedAt),
       escalatedAt,
       status,
-      statusText: statusTextMap[status],
+      statusText,
       approvalStage,
       approvals,
       interventions,

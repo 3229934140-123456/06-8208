@@ -7,6 +7,7 @@ import { LineChart, PieChart, RadarChart, TimelineChart } from '@/components/cha
 import type { PieDataItem, RadarIndicator, RadarSeries } from '@/components/charts';
 import type { TimelineEvent } from '@/components/charts/TimelineChart';
 import { useDataStore } from '@/store/dataStore';
+import { useCanAccessStudent } from '@/hooks/usePermission';
 import type { StudentProfile, AssessmentRecord, AssessmentDimension, RiskLevel, InterventionRecord } from '@/types';
 import { cn } from '@/lib/utils';
 import {
@@ -44,6 +45,7 @@ import {
   CheckCheck,
   FileEdit,
   AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -132,7 +134,7 @@ const emotionDimensionLabels: Record<AssessmentDimension, string> = {
 export default function StudentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getStudentById, updateStudent, initializeData, isFocusStudent, toggleFocusStudent } = useDataStore();
+  const { getStudentById, updateStudent, initializeData, isFocusStudent, toggleFocusStudent, focusedStudentIds } = useDataStore();
 
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const [compareFirst, setCompareFirst] = useState(0);
@@ -142,6 +144,7 @@ export default function StudentDetailPage() {
   const [showAssessmentLinkModal, setShowAssessmentLinkModal] = useState(false);
   const [showAddInterventionModal, setShowAddInterventionModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({ show: false, message: '', type: 'success' });
   const [editForm, setEditForm] = useState<Partial<StudentProfile>>({});
   const [interventionForm, setInterventionForm] = useState({
     type: 'intervention' as 'intervention' | 'followup' | 'warning',
@@ -160,10 +163,27 @@ export default function StudentDetailPage() {
     return getStudentById(id);
   }, [id, getStudentById]);
 
+  const canAccess = useCanAccessStudent(id || '');
+
   const isFocused = useMemo(() => {
     if (!id) return false;
     return isFocusStudent(id);
-  }, [id, isFocusStudent]);
+  }, [id, isFocusStudent, focusedStudentIds]);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'success' });
+    }, 2000);
+  };
+
+  const handleToggleFocus = () => {
+    if (!student) return;
+    const wasFocused = isFocused;
+    toggleFocusStudent(student.id);
+    const isNowFocused = !wasFocused;
+    showToast(isNowFocused ? `已将 ${student.name} 加入重点关注` : `已将 ${student.name} 移出重点关注`, 'success');
+  };
 
   const emotionChartData = useMemo(() => {
     if (!student || !student.emotionHistory || student.emotionHistory.length === 0) {
@@ -336,15 +356,19 @@ export default function StudentDetailPage() {
     navigate(`/warning/${warningId}`);
   };
 
-  if (!student) {
+  if (!student || !canAccess) {
     return (
       <MainLayout breadcrumbs={breadcrumbs}>
         <div className="flex flex-col items-center justify-center py-20">
           <div className="w-20 h-20 rounded-2xl bg-ink-100 flex items-center justify-center mb-4">
             <User className="h-10 w-10 text-ink-300" />
           </div>
-          <h3 className="text-xl font-bold text-ink-800 mb-2">学生不存在</h3>
-          <p className="text-sm text-ink-500 mb-6">未找到对应的学生档案</p>
+          <h3 className="text-xl font-bold text-ink-800 mb-2">
+            {!student ? '学生不存在' : '无权限访问'}
+          </h3>
+          <p className="text-sm text-ink-500 mb-6">
+            {!student ? '未找到对应的学生档案' : '您没有权限查看该学生的档案信息'}
+          </p>
           <button
             onClick={() => navigate('/students')}
             className="btn-secondary flex items-center gap-2"
@@ -362,6 +386,18 @@ export default function StudentDetailPage() {
   return (
     <MainLayout breadcrumbs={breadcrumbs}>
       <div className="space-y-6 stagger-reveal">
+        {toast.show && (
+          <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-xl shadow-lg animate-fade-in-up flex items-center gap-2 ${
+            toast.type === 'success' ? 'bg-mint-500 text-white' : 'bg-warning-high text-white'
+          }`}>
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="h-5 w-5" />
+            ) : (
+              <AlertCircle className="h-5 w-5" />
+            )}
+            <span className="font-medium">{toast.message}</span>
+          </div>
+        )}
         <button
           onClick={() => navigate(-1)}
           className="inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-primary-600 transition-colors"
@@ -470,7 +506,7 @@ export default function StudentDetailPage() {
                 编辑档案
               </button>
               <button
-                onClick={() => toggleFocusStudent(student.id)}
+                onClick={handleToggleFocus}
                 className={cn(
                   'flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200 border',
                   isFocused

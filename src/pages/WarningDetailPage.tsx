@@ -79,6 +79,7 @@ export default function WarningDetailPage() {
   const [interventionDesc, setInterventionDesc] = useState('');
   const [approvalComment, setApprovalComment] = useState('');
   const [showContactModal, setShowContactModal] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
 
   useEffect(() => {
     initializeData();
@@ -129,7 +130,7 @@ export default function WarningDetailPage() {
     }
   }, [user]);
 
-  const canApprove = currentStage === myStage && currentStage > 0 && warning?.status !== 'rejected' && warning?.status !== 'resolved';
+  const canApprove = warning?.level === 2 && currentStage === myStage && currentStage >= 1 && currentStage <= 3 && warning?.status !== 'rejected' && warning?.status !== 'resolved' && warning?.status !== 'approved';
 
   const approvals = useMemo<ApprovalRecord[]>(() => {
     if (!warning) return [];
@@ -282,32 +283,40 @@ export default function WarningDetailPage() {
     setInterventionDesc('');
   };
 
-  const handleApproval = (approved: boolean) => {
-    if (!canApprove || !warning || !user) return;
+  const handleApproval = async (approved: boolean) => {
+    if (!canApprove || !warning || !user || isApproving) return;
 
-    const stage = myStage as 1 | 2 | 3;
-    const success = approveWarningStage(
-      warning.id,
-      stage,
-      user.id,
-      user.name,
-      approvalComment.trim(),
-      approved
-    );
+    setIsApproving(true);
 
-    if (success) {
-      addNotification({
-        type: 'success',
-        title: approved ? '审批通过' : '审批驳回',
-        message: `预警 ${warning.id} ${approved ? '已通过' : '已驳回'}`,
-      });
-      setApprovalComment('');
-    } else {
-      addNotification({
-        type: 'error',
-        title: '操作失败',
-        message: '审批操作失败，请重试',
-      });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      const stage = myStage as 1 | 2 | 3;
+      const success = approveWarningStage(
+        warning.id,
+        stage,
+        user.id,
+        user.name,
+        approvalComment.trim(),
+        approved
+      );
+
+      if (success) {
+        addNotification({
+          type: 'success',
+          title: approved ? '审批通过' : '审批驳回',
+          message: `预警 ${warning.id} ${approved ? '已通过' : '已驳回'}`,
+        });
+        setApprovalComment('');
+      } else {
+        addNotification({
+          type: 'error',
+          title: '操作失败',
+          message: '审批操作失败，请重试',
+        });
+      }
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -615,66 +624,69 @@ ${warning.interventions.map((iv) => `
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <CheckCircle2 className="h-5 w-5 text-primary-500" />
-                  三级审批流程
-                  {canApprove && <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-primary-50 text-primary-600 border border-primary-200">待您处理</span>}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="relative px-2">
-                  <div className="grid grid-cols-3 gap-2 relative z-10">
-                    {approvals.map((apr, idx) => {
-                      const isCompleted = apr.status === 'approved' || apr.status === 'rejected';
-                      const isCurrent = currentStage === apr.stage && canApprove;
-                      const isRejected = apr.status === 'rejected';
-                      return (
-                        <div key={apr.id} className="flex flex-col items-center text-center">
-                          <div className={cn(
-                            'relative flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all duration-300',
-                            isCompleted && !isRejected ? 'bg-risk-safe text-white border-risk-safe shadow-md shadow-risk-safe/30'
-                              : isRejected ? 'bg-warning-high text-white border-warning-high shadow-md'
-                              : isCurrent ? 'bg-white text-primary-500 border-primary-500 shadow-lg shadow-primary-500/30 scale-110'
-                              : 'bg-white text-ink-300 border-ink-200'
-                          )}>
-                            {isCompleted && !isRejected ? <CheckCircle2 className="h-6 w-6" strokeWidth={2.5} />
-                              : isRejected ? <XCircle className="h-6 w-6" strokeWidth={2.5} />
-                              : isCurrent ? <Clock className="h-6 w-6 animate-pulse" strokeWidth={2} />
-                              : <Circle className="h-6 w-6" strokeWidth={2} />}
+            {warning?.level === 2 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <CheckCircle2 className="h-5 w-5 text-primary-500" />
+                    三级审批流程
+                    {canApprove && <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-primary-50 text-primary-600 border border-primary-200">待您处理</span>}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="relative px-2">
+                    <div className="grid grid-cols-3 gap-2 relative z-10">
+                      {approvals.map((apr, idx) => {
+                        const isCompleted = apr.status === 'approved' || apr.status === 'rejected';
+                        const isCurrent = currentStage === apr.stage && apr.stage >= 1 && apr.stage <= 3;
+                        const isRejected = apr.status === 'rejected';
+                        const isAllApproved = currentStage === 4;
+                        const showAsCompleted = isCompleted || (isAllApproved && apr.stage <= 3);
+                        return (
+                          <div key={apr.id} className="flex flex-col items-center text-center">
+                            <div className={cn(
+                              'relative flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all duration-300',
+                              showAsCompleted && !isRejected ? 'bg-risk-safe text-white border-risk-safe shadow-md shadow-risk-safe/30'
+                                : isRejected ? 'bg-warning-high text-white border-warning-high shadow-md'
+                                : isCurrent && canApprove ? 'bg-white text-primary-500 border-primary-500 shadow-lg shadow-primary-500/30 scale-110'
+                                : 'bg-white text-ink-300 border-ink-200'
+                            )}>
+                              {showAsCompleted && !isRejected ? <CheckCircle2 className="h-6 w-6" strokeWidth={2.5} />
+                                : isRejected ? <XCircle className="h-6 w-6" strokeWidth={2.5} />
+                                : isCurrent && canApprove ? <Clock className="h-6 w-6 animate-pulse" strokeWidth={2} />
+                                : <Circle className="h-6 w-6" strokeWidth={2} />}
+                            </div>
+                            <p className="mt-3 text-sm font-bold text-ink-800">{apr.stageName}</p>
+                            <p className="mt-0.5 text-xs text-ink-500">{apr.approverName}</p>
+                            {apr.createdAt && (
+                              <p className="mt-0.5 text-[10px] text-ink-400">{new Date(apr.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
+                            )}
+                            {apr.comment && (
+                              <p className="mt-2 text-xs text-ink-500 px-2 py-1.5 rounded-lg bg-ink-50 max-w-[200px] leading-relaxed">
+                                "{apr.comment}"
+                              </p>
+                            )}
                           </div>
-                          <p className="mt-3 text-sm font-bold text-ink-800">{apr.stageName}</p>
-                          <p className="mt-0.5 text-xs text-ink-500">{apr.approverName}</p>
-                          {apr.createdAt && (
-                            <p className="mt-0.5 text-[10px] text-ink-400">{new Date(apr.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>
-                          )}
-                          {apr.comment && (
-                            <p className="mt-2 text-xs text-ink-500 px-2 py-1.5 rounded-lg bg-ink-50 max-w-[200px] leading-relaxed">
-                              "{apr.comment}"
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
 
-                  <div className="absolute top-6 left-[8%] right-[8%] h-0.5 z-0 flex items-center">
-                    {[0, 1].map((segIdx) => {
-                      const segCompleted = approvals[segIdx]?.status === 'approved';
-                      return (
-                        <div key={segIdx} className="flex-1 mx-4 h-full">
-                          <div className={cn(
-                            'h-full transition-all duration-1000',
-                            segCompleted ? 'bg-risk-safe' : 'bg-ink-200'
-                          )}
-                            style={segCompleted ? { backgroundImage: 'linear-gradient(90deg, #2EC4B6 0%, #2EC4B6 50%, transparent 50%)', backgroundSize: '10px 100%', animation: 'shimmer 1.5s linear infinite' } : {}}
-                          />
-                        </div>
-                      );
-                    })}
+                    <div className="absolute top-6 left-[8%] right-[8%] h-0.5 z-0 flex items-center">
+                      {[0, 1].map((segIdx) => {
+                        const segCompleted = approvals[segIdx]?.status === 'approved' || (currentStage === 4 && segIdx < 2);
+                        return (
+                          <div key={segIdx} className="flex-1 mx-4 h-full">
+                            <div className={cn(
+                              'h-full transition-all duration-1000',
+                              segCompleted ? 'bg-risk-safe' : 'bg-ink-200'
+                            )}
+                              style={segCompleted ? { backgroundImage: 'linear-gradient(90deg, #2EC4B6 0%, #2EC4B6 50%, transparent 50%)', backgroundSize: '10px 100%', animation: 'shimmer 1.5s linear infinite' } : {}}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
 
                 {canApprove && (
                   <div className="p-5 rounded-2xl border-2 border-primary-200 bg-gradient-to-br from-primary-50/60 to-mint-50/40 animate-fade-in-up">
@@ -690,25 +702,36 @@ ${warning.interventions.map((iv) => `
                           rows={3}
                           placeholder="请输入您的审批意见，说明通过或驳回的原因..."
                           className="input-base resize-none text-sm mt-2"
+                          disabled={isApproving}
                         />
                       </div>
                     </div>
                     <div className="flex justify-end gap-3">
                       <button
                         onClick={() => handleApproval(false)}
-                        className="px-6 py-2.5 rounded-xl font-medium border border-warning-high/40 text-warning-high bg-white hover:bg-warning-high/5 transition-all duration-200"
+                        disabled={isApproving}
+                        className="px-6 py-2.5 rounded-xl font-medium border border-warning-high/40 text-warning-high bg-white hover:bg-warning-high/5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <span className="flex items-center gap-2">
-                          <XCircle className="h-4 w-4" />
+                          {isApproving ? (
+                            <div className="h-4 w-4 border-2 border-warning-high border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <XCircle className="h-4 w-4" />
+                          )}
                           驳回
                         </span>
                       </button>
                       <button
                         onClick={() => handleApproval(true)}
-                        className="btn-primary"
+                        disabled={isApproving}
+                        className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <span className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4" />
+                          {isApproving ? (
+                            <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="h-4 w-4" />
+                          )}
                           通过
                         </span>
                       </button>
@@ -716,7 +739,8 @@ ${warning.interventions.map((iv) => `
                   </div>
                 )}
               </CardContent>
-            </Card>
+              </Card>
+            )}
 
             <Card>
               <CardHeader className="pb-3">

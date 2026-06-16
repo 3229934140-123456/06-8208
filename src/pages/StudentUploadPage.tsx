@@ -4,6 +4,7 @@ import { MainLayout, type BreadcrumbItem } from '@/components/layout/MainLayout'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { useDataStore } from '@/store/dataStore';
+import { useDataFilter, useScope } from '@/hooks/usePermission';
 import type { StudentProfile, Gender, RiskLevel, AssessmentDimension, DimensionResult } from '@/types';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -51,19 +52,24 @@ interface PreviewRow {
   familyHistory: string;
   currentEmotionIndex: number | string;
   depressionScore: number | string;
+  warningCount: number | string;
+  riskLevel: string;
+  lastAssessmentDate: string;
+  tags: string;
   status: 'success' | 'error' | 'skipped';
   errorMsg?: string;
 }
 
 const templateColumns = [
   '学号', '姓名', '性别', '年龄', '学院', '专业', '年级', '班级',
-  '辅导员', '联系电话', '既往病史', '家族史', '当前情绪指数', '抑郁得分'
+  '辅导员', '联系电话', '既往病史', '家族史', '当前情绪指数', '抑郁得分',
+  '预警次数', '风险等级', '上次测评日期', '标签'
 ];
 
 const templateSampleData = [
-  ['2024010001', '张三', '男', 19, '计算机学院', '软件工程', '大一', '软工2401班', '王老师', '13812345678', '无', '无', 85, 30],
-  ['2024010002', '李四', '女', 18, '经济管理学院', '金融学', '大一', '金融2402班', '李老师', '13987654321', '无', '无', 78, 45],
-  ['2024010003', '王五', '男', 20, '文学院', '汉语言文学', '大二', '中文2301班', '张老师', '13611112222', '过敏性鼻炎', '无', 92, 25],
+  ['2024010001', '张三', '男', 19, '计算机学院', '软件工程', '大一', '软工2401班', '王老师', '13812345678', '无', '无', 85, 30, 0, '安全', '2024-09-01', '新生,学业困难'],
+  ['2024010002', '李四', '女', 18, '经济管理学院', '金融学', '大一', '金融2402班', '李老师', '13987654321', '无', '无', 78, 45, 1, '低风险', '2024-09-05', '新生,家庭变故'],
+  ['2024010003', '王五', '男', 20, '文学院', '汉语言文学', '大二', '中文2301班', '张老师', '13611112222', '过敏性鼻炎', '无', 92, 25, 2, '中风险', '2024-09-10', '性格内向,失恋'],
 ];
 
 function getRiskLevelFromScore(depressionScore: number): RiskLevel {
@@ -81,8 +87,29 @@ function validateStudentNo(studentNo: string): boolean {
   return /^\d{6,12}$/.test(studentNo);
 }
 
+function parseRiskLevel(input: string): RiskLevel | null {
+  const lower = input.trim().toLowerCase();
+  const riskLevelMap: Record<string, RiskLevel> = {
+    '安全': 'safe',
+    '低风险': 'low',
+    '中风险': 'medium',
+    '高风险': 'high',
+    'safe': 'safe',
+    'low': 'low',
+    'medium': 'medium',
+    'high': 'high',
+  };
+  return riskLevelMap[lower] || riskLevelMap[input.trim()] || null;
+}
+
+function parseTags(input: string): string[] {
+  if (!input || !input.trim()) return [];
+  return input.split(/[,，;；、]/).map(t => t.trim()).filter(t => t.length > 0);
+}
+
 export default function StudentUploadPage() {
   const navigate = useNavigate();
+  const scope = useScope();
   const { students, addStudents, getUploadRecords, addUploadRecord, initializeData } = useDataStore();
   const [step, setStep] = useState<UploadStep>(1);
   const [isDragging, setIsDragging] = useState(false);
@@ -94,6 +121,7 @@ export default function StudentUploadPage() {
   const [showConfirmCancel, setShowConfirmCancel] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
   const [importSuccess, setImportSuccess] = useState(false);
+  const [importedFocusCount, setImportedFocusCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -110,12 +138,22 @@ export default function StudentUploadPage() {
   }, [previewData]);
 
   const handleDownloadTemplate = useCallback(() => {
-    const wsData = [templateColumns, ...templateSampleData];
+    let sampleData = templateSampleData;
+    if (scope?.schoolName || scope?.college) {
+      sampleData = templateSampleData.map(row => {
+        const newRow = [...row];
+        if (scope?.college) {
+          newRow[4] = scope.college;
+        }
+        return newRow;
+      });
+    }
+    const wsData = [templateColumns, ...sampleData];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '学生档案');
     XLSX.writeFile(wb, '学生档案导入模板.xlsx');
-  }, []);
+  }, [scope]);
 
   const parseExcelFile = useCallback(async (file: File) => {
     setIsUploading(true);
@@ -160,6 +198,10 @@ export default function StudentUploadPage() {
         const familyHistory = String(rowData['家族史'] || rowData['familyHistory'] || '').trim();
         const currentEmotionIndex = rowData['当前情绪指数'] || rowData['currentEmotionIndex'] || '';
         const depressionScore = rowData['抑郁得分'] || rowData['depressionScore'] || '';
+        const warningCount = rowData['预警次数'] || rowData['warningCount'] || '';
+        const riskLevelStr = String(rowData['风险等级'] || rowData['riskLevel'] || '').trim();
+        const lastAssessmentDate = String(rowData['上次测评日期'] || rowData['lastAssessmentDate'] || '').trim();
+        const tags = String(rowData['标签'] || rowData['tags'] || '').trim();
 
         let status: 'success' | 'error' | 'skipped' = 'success';
         const errors: string[] = [];
@@ -198,6 +240,22 @@ export default function StudentUploadPage() {
           errors.push('手机号格式不正确');
         }
 
+        if (warningCount !== '' && warningCount !== undefined && warningCount !== null) {
+          const val = Number(warningCount);
+          if (isNaN(val) || val < 0 || !Number.isInteger(val)) {
+            if (status === 'success') status = 'error';
+            errors.push('预警次数必须为非负整数');
+          }
+        }
+
+        if (riskLevelStr) {
+          const parsed = parseRiskLevel(riskLevelStr);
+          if (!parsed) {
+            if (status === 'success') status = 'error';
+            errors.push('风险等级只能是"安全/低风险/中风险/高风险"或"safe/low/medium/high"');
+          }
+        }
+
         return {
           index: idx + 1,
           studentNo,
@@ -214,6 +272,10 @@ export default function StudentUploadPage() {
           familyHistory,
           currentEmotionIndex,
           depressionScore,
+          warningCount,
+          riskLevel: riskLevelStr,
+          lastAssessmentDate,
+          tags,
           status,
           errorMsg: errors.join('；') || undefined,
         };
@@ -303,15 +365,33 @@ export default function StudentUploadPage() {
       return;
     }
 
+    const defaultSchoolId = scope?.schoolId || 'SCH0001';
+    const defaultSchoolName = scope?.schoolName || '清华大学';
+    const defaultCollege = scope?.college || '';
+
     const newStudents: StudentProfile[] = successRows.map((row) => {
       const emotionIndex = row.currentEmotionIndex ? Number(row.currentEmotionIndex) : 80;
       const depressionScore = row.depressionScore ? Number(row.depressionScore) : 0;
-      const riskLevel = row.depressionScore 
-        ? getRiskLevelFromScore(Number(row.depressionScore))
-        : 'safe';
+      const warningCountVal = row.warningCount !== '' && row.warningCount !== null && row.warningCount !== undefined
+        ? Number(row.warningCount)
+        : 0;
+      
+      let riskLevel: RiskLevel;
+      if (row.riskLevel) {
+        const parsed = parseRiskLevel(row.riskLevel);
+        riskLevel = parsed || 'safe';
+      } else if (row.depressionScore) {
+        riskLevel = getRiskLevelFromScore(Number(row.depressionScore));
+      } else {
+        riskLevel = 'safe';
+      }
 
+      const assessmentDate = row.lastAssessmentDate || new Date().toISOString().split('T')[0];
+      const tagsList = parseTags(row.tags);
+
+      const depressionLevel = riskLevel === 'safe' ? '正常' : riskLevel === 'low' ? '轻度' : riskLevel === 'medium' ? '中度' : '重度';
       const dimensions: Record<AssessmentDimension, DimensionResult> = {
-        depression: { score: Number(row.depressionScore) || 0, level: riskLevel === 'safe' ? '正常' : riskLevel === 'low' ? '轻度' : riskLevel === 'medium' ? '中度' : '重度' },
+        depression: { score: Number(row.depressionScore) || 0, level: depressionLevel },
         anxiety: { score: Math.floor(Math.random() * 50) + 20, level: '正常' },
         stress: { score: Math.floor(Math.random() * 50) + 20, level: '正常' },
         sleep: { score: Math.floor(Math.random() * 50) + 20, level: '正常' },
@@ -334,9 +414,9 @@ export default function StudentUploadPage() {
         gender: (row.gender as Gender) || '男',
         age: Number(row.age) || 18,
         studentNo: row.studentNo,
-        schoolId: 'SCH0001',
-        schoolName: '清华大学',
-        college: row.college || '计算机学院',
+        schoolId: defaultSchoolId,
+        schoolName: defaultSchoolName,
+        college: row.college || defaultCollege || '计算机学院',
         major: row.major || '软件工程',
         grade: row.grade || '大一',
         className: row.className || '',
@@ -344,12 +424,12 @@ export default function StudentUploadPage() {
         counselor: row.counselor || '未分配',
         currentEmotionIndex: emotionIndex,
         riskLevel,
-        warningCount: 0,
+        warningCount: warningCountVal,
         assessmentHistory: [{
           id: `ASM${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
           studentId: '',
           assessmentName: 'SDS自评量表',
-          assessmentDate: new Date().toISOString().split('T')[0],
+          assessmentDate,
           overallScore: Math.floor(emotionIndex),
           dimensions,
           conclusion: '导入时初始化测评数据',
@@ -359,13 +439,23 @@ export default function StudentUploadPage() {
         warningHistory: [],
         medicalHistory: row.medicalHistory || undefined,
         familyHistory: row.familyHistory || undefined,
-        tags: [],
+        tags: tagsList,
       };
     });
 
     newStudents.forEach(s => {
       s.assessmentHistory[0].studentId = s.id;
     });
+
+    const focusCount = newStudents.filter(s => {
+      if (s.riskLevel === 'high') return true;
+      if (s.warningCount >= 2) return true;
+      const hasSevere = s.assessmentHistory.some(a =>
+        Object.values(a.dimensions).some((d: any) => d.level === '重度')
+      );
+      if (hasSevere) return true;
+      return false;
+    }).length;
 
     const addedIds = addStudents(newStudents);
 
@@ -374,9 +464,11 @@ export default function StudentUploadPage() {
       successCount: addedIds.length,
       failCount: stats.fail,
       skipCount: stats.skip,
+      focusCount,
       operator: '管理员',
     });
 
+    setImportedFocusCount(focusCount);
     setImportSuccess(true);
   };
 
@@ -584,8 +676,11 @@ export default function StudentUploadPage() {
                     <h3 className="text-2xl font-bold text-ink-800 mb-3">导入成功！</h3>
                     <p className="text-ink-600 mb-6">
                       成功导入 <span className="font-bold text-mint-600">{stats.success}</span> 条学生数据
+                      {importedFocusCount > 0 && (
+                        <>，其中 <span className="font-bold text-warning-high">{importedFocusCount}</span> 人自动进入重点关注</>
+                      )}
                     </p>
-                    <div className="grid grid-cols-3 gap-4 max-w-md mx-auto mb-8">
+                    <div className="grid grid-cols-4 gap-4 max-w-lg mx-auto mb-8">
                       <div className="p-4 rounded-xl bg-mint-50 border border-mint-200">
                         <div className="text-2xl font-bold text-mint-600">{stats.success}</div>
                         <div className="text-xs text-mint-600/70">成功</div>
@@ -597,6 +692,10 @@ export default function StudentUploadPage() {
                       <div className="p-4 rounded-xl bg-warning-low/15 border border-warning-low/40">
                         <div className="text-2xl font-bold text-warning-low">{stats.skip}</div>
                         <div className="text-xs text-warning-low/70">跳过</div>
+                      </div>
+                      <div className="p-4 rounded-xl bg-risk-high/10 border border-risk-high/30">
+                        <div className="text-2xl font-bold text-risk-high">{importedFocusCount}</div>
+                        <div className="text-xs text-risk-high/70">重点关注</div>
                       </div>
                     </div>
                     <button
@@ -814,6 +913,9 @@ export default function StudentUploadPage() {
                     { title: '手机号格式', desc: '11位中国大陆手机号' },
                     { title: '情绪指数', desc: '0-100的整数，数值越高情绪越好' },
                     { title: '抑郁得分', desc: '用于计算风险等级，得分越高风险越大' },
+                    { title: '预警次数', desc: '非负整数，达到2次自动进入重点关注' },
+                    { title: '风险等级', desc: '可填写：安全/低风险/中风险/高风险 或 safe/low/medium/high' },
+                    { title: '标签', desc: '多个标签用逗号、分号或顿号分隔' },
                     { title: '重复数据', desc: '系统将自动跳过学号已存在的重复记录，不会覆盖原有数据' },
                   ].map((item, i) => (
                     <li key={i} className="flex gap-3">
@@ -873,6 +975,11 @@ export default function StudentUploadPage() {
                         {record.skipCount > 0 && (
                           <Badge color="risk-medium" size="sm" variant="soft">
                             跳过 {record.skipCount}
+                          </Badge>
+                        )}
+                        {(record as any).focusCount !== undefined && (record as any).focusCount > 0 && (
+                          <Badge color="risk-high" size="sm" variant="soft">
+                            重点关注 {(record as any).focusCount}
                           </Badge>
                         )}
                       </div>

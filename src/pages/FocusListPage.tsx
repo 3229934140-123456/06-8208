@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { Badge } from '@/components/ui/Badge';
 import { useDataStore } from '@/store/dataStore';
+import { useDataFilter } from '@/hooks/usePermission';
 import type { StudentProfile, RiskLevel, Gender, AssessmentDimension } from '@/types';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -151,7 +152,8 @@ function getWarningCountThisMonth(student: StudentProfile): number {
 
 export default function FocusListPage() {
   const navigate = useNavigate();
-  const { getFocusStudents, toggleFocusStudent, isFocusStudent, initializeData, students } = useDataStore();
+  const dataFilter = useDataFilter();
+  const { getStudents, toggleFocusStudent, isFocusStudent, initializeData } = useDataStore();
 
   const [searchValue, setSearchValue] = useState('');
   const [reason, setReason] = useState('');
@@ -168,16 +170,18 @@ export default function FocusListPage() {
     initializeData();
   }, [initializeData]);
 
+  const allStudents = useMemo(() => getStudents(dataFilter), [getStudents, dataFilter]);
+
   const collegeOptions = useMemo(() => {
-    const colleges = new Set(students.map(s => s.college));
+    const colleges = new Set(allStudents.map(s => s.college));
     return [
       { value: '', label: '全部学院' },
       ...Array.from(colleges).map(c => ({ value: c, label: c })),
     ];
-  }, [students]);
+  }, [allStudents]);
 
   const focusStudents = useMemo((): FocusStudent[] => {
-    const focusList = getFocusStudents();
+    const focusList = getStudents({ ...dataFilter, isFocus: true });
     return focusList.map(student => {
       const isFocused = isFocusStudent(student.id);
       return {
@@ -190,7 +194,7 @@ export default function FocusListPage() {
         warningCountThisMonth: getWarningCountThisMonth(student),
       };
     }).sort((a, b) => b.severity - a.severity);
-  }, [getFocusStudents, isFocusStudent]);
+  }, [getStudents, dataFilter, isFocusStudent]);
 
   const stats = useMemo(() => {
     const today = new Date();
@@ -203,10 +207,10 @@ export default function FocusListPage() {
     return {
       current: focusStudents.length,
       newThisWeek,
-      released: Math.floor(students.length * 0.1),
+      released: Math.floor(allStudents.length * 0.1),
       avgCycle: '18.5',
     };
-  }, [focusStudents, students.length]);
+  }, [focusStudents, allStudents.length]);
 
   const filteredStudents = useMemo(() => {
     return focusStudents.filter((s) => {

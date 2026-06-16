@@ -80,7 +80,7 @@ export interface WarningRecord {
   escalatedAt?: string;
   status: WarningStatus;
   statusText: string;
-  approvalStage?: 0 | 1 | 2 | 3;
+  approvalStage?: 0 | 1 | 2 | 3 | 4;
   approvals: ApprovalRecord[];
   interventions: InterventionRecord[];
 }

@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { Badge } from '@/components/ui/Badge';
 import { useDataStore } from '@/store/dataStore';
+import { useDataFilter, useScope } from '@/hooks/usePermission';
 import type { StudentProfile, RiskLevel, Gender } from '@/types';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -31,6 +32,7 @@ import {
   BookOpen,
   ShieldAlert,
   Save,
+  AlertCircle,
 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -53,20 +55,6 @@ const colleges = [
 const grades = [
   '全部年级', '大一', '大二', '大三', '大四', '研一', '研二', '研三', '博一', '博二'
 ];
-
-const majorsMap: Record<string, string[]> = {
-  '全部学院': ['全部专业'],
-  '计算机学院': ['全部专业', '计算机科学与技术', '软件工程', '人工智能', '数据科学'],
-  '经济管理学院': ['全部专业', '经济学', '金融学', '工商管理', '会计学'],
-  '文学院': ['全部专业', '汉语言文学', '新闻学', '传播学'],
-  '理学院': ['全部专业', '数学', '物理学', '化学', '生物学'],
-  '工学院': ['全部专业', '机械工程', '土木工程', '电气工程'],
-  '医学院': ['全部专业', '临床医学', '护理学', '药学'],
-  '法学院': ['全部专业', '法学', '知识产权'],
-  '外国语学院': ['全部专业', '英语', '日语', '法语'],
-  '艺术学院': ['全部专业', '美术', '音乐', '设计'],
-  '体育学院': ['全部专业', '体育教育', '运动训练'],
-};
 
 const riskLevelOptions: { value: RiskLevel | ''; label: string }[] = [
   { value: '', label: '全部' },
@@ -140,7 +128,9 @@ const tagPool = ['新生', '贫困生', '独生子女', '留守儿童', '性格�
 
 export default function StudentListPage() {
   const navigate = useNavigate();
-  const { students, getStudents, isFocusStudent, addStudents, updateStudent, initializeData } = useDataStore();
+  const dataFilter = useDataFilter();
+  const scope = useScope();
+  const { getStudents, isFocusStudent, addStudents, updateStudent, initializeData, toggleFocusStudent, focusedStudentIds } = useDataStore();
   const [activeTab, setActiveTab] = useState('all');
   const [searchValue, setSearchValue] = useState('');
   const [college, setCollege] = useState('全部学院');
@@ -159,19 +149,31 @@ export default function StudentListPage() {
   const [editingStudent, setEditingStudent] = useState<StudentProfile | null>(null);
   const [formData, setFormData] = useState<StudentFormData>(emptyFormData);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({ show: false, message: '', type: 'success' });
 
   useEffect(() => {
     initializeData();
   }, [initializeData]);
 
-  const allStudents = useMemo(() => getStudents(), [getStudents, students]);
+  const allStudents = useMemo(() => getStudents(dataFilter), [getStudents, dataFilter, focusedStudentIds]);
+
+  const collegeOptions = useMemo(() => {
+    const collegeSet = new Set(allStudents.map(s => s.college));
+    return ['全部学院', ...Array.from(collegeSet)];
+  }, [allStudents]);
 
   const majorOptions = useMemo(() => {
-    return majorsMap[college] || ['全部专业'];
-  }, [college]);
+    if (college === '全部学院') {
+      const majorSet = new Set(allStudents.map(s => s.major));
+      return ['全部专业', ...Array.from(majorSet)];
+    }
+    const collegeStudents = allStudents.filter(s => s.college === college);
+    const majorSet = new Set(collegeStudents.map(s => s.major));
+    return ['全部专业', ...Array.from(majorSet)];
+  }, [allStudents, college]);
 
   const filteredStudents = useMemo(() => {
-    const filter: Parameters<typeof getStudents>[0] = {};
+    const filter: Parameters<typeof getStudents>[0] = { ...dataFilter };
 
     if (activeTab === 'focus') {
       filter.isFocus = true;
@@ -210,7 +212,7 @@ export default function StudentListPage() {
     }
 
     return getStudents(filter);
-  }, [getStudents, activeTab, college, grade, major, riskLevel, selectedRiskLevels, gender, warningRangeMin, warningRangeMax, searchValue]);
+  }, [getStudents, dataFilter, activeTab, college, grade, major, riskLevel, selectedRiskLevels, gender, warningRangeMin, warningRangeMax, searchValue, focusedStudentIds]);
 
   const stats = useMemo(() => {
     const total = allStudents.length;
@@ -222,14 +224,7 @@ export default function StudentListPage() {
       return idDate === todayStr;
     }).length;
     return { total, today, risk, focus };
-  }, [allStudents, isFocusStudent]);
-
-  const filteredStats = useMemo(() => {
-    const total = filteredStudents.length;
-    const risk = filteredStudents.filter(s => s.riskLevel !== 'safe').length;
-    const focus = filteredStudents.filter(s => isFocusStudent(s.id)).length;
-    return { total, risk, focus };
-  }, [filteredStudents, isFocusStudent]);
+  }, [allStudents, isFocusStudent, focusedStudentIds]);
 
   const totalPages = Math.ceil(filteredStudents.length / pageSize);
   const pageData = filteredStudents.slice((page - 1) * pageSize, page * pageSize);
@@ -263,6 +258,20 @@ export default function StudentListPage() {
     );
   };
 
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'success' });
+    }, 2000);
+  };
+
+  const handleToggleFocus = (student: StudentProfile) => {
+    const wasFocused = isFocusStudent(student.id);
+    toggleFocusStudent(student.id);
+    const isNowFocused = !wasFocused;
+    showToast(isNowFocused ? `已将 ${student.name} 加入重点关注` : `已将 ${student.name} 移出重点关注`, 'success');
+  };
+
   const handleView = (id: string) => {
     navigate(`/students/${id}`);
   };
@@ -291,7 +300,11 @@ export default function StudentListPage() {
   };
 
   const handleAdd = () => {
-    setFormData(emptyFormData);
+    const defaultFormData = { ...emptyFormData };
+    if (scope?.college) {
+      defaultFormData.college = scope.college;
+    }
+    setFormData(defaultFormData);
     setFormErrors({});
     setShowAddModal(true);
   };
@@ -339,15 +352,19 @@ export default function StudentListPage() {
   const handleSaveAdd = () => {
     if (!validateForm()) return;
 
+    const defaultSchoolId = scope?.schoolId || 'SCH0001';
+    const defaultSchoolName = scope?.schoolName || '清华大学';
+    const defaultCollege = scope?.college || formData.college;
+
     const newStudent: StudentProfile = {
       id: `STD${Date.now()}`,
       name: formData.name,
       gender: formData.gender,
       age: formData.age,
       studentNo: formData.studentNo,
-      schoolId: 'SCH0001',
-      schoolName: '清华大学',
-      college: formData.college,
+      schoolId: defaultSchoolId,
+      schoolName: defaultSchoolName,
+      college: defaultCollege,
       major: formData.major,
       grade: formData.grade,
       className: formData.className,
@@ -381,6 +398,19 @@ export default function StudentListPage() {
   return (
     <MainLayout breadcrumbs={breadcrumbs}>
       <div className="space-y-6 stagger-reveal">
+        {toast.show && (
+          <div className={cn(
+            'fixed top-20 right-6 z-50 px-5 py-3 rounded-xl shadow-lg animate-slide-in flex items-center gap-2',
+            toast.type === 'success' ? 'bg-mint-500 text-white' : 'bg-warning-high text-white'
+          )}>
+            {toast.type === 'success' ? (
+              <Check className="h-5 w-5" />
+            ) : (
+              <AlertCircle className="h-5 w-5" />
+            )}
+            <span className="font-medium text-sm">{toast.message}</span>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 lg:gap-6">
           <StatCard
             title="总人数"
@@ -811,6 +841,7 @@ export default function StudentListPage() {
                               <Bell className="h-4 w-4" />
                             </button>
                             <button
+                              onClick={() => handleToggleFocus(student)}
                               className={cn(
                                 'p-1.5 rounded-lg transition-colors',
                                 isFocus
@@ -968,7 +999,7 @@ export default function StudentListPage() {
                     onChange={(e) => setFormData({ ...formData, college: e.target.value })}
                     className="input-base"
                   >
-                    {colleges.slice(1).map((c) => (
+                    {collegeOptions.slice(1).map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
@@ -1168,7 +1199,7 @@ export default function StudentListPage() {
                     onChange={(e) => setFormData({ ...formData, college: e.target.value })}
                     className="input-base"
                   >
-                    {colleges.slice(1).map((c) => (
+                    {collegeOptions.slice(1).map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>

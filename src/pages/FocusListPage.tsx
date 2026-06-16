@@ -1,9 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout, type BreadcrumbItem } from '@/components/layout/MainLayout';
 import { Card, CardContent } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { Badge } from '@/components/ui/Badge';
-import type { RiskLevel, Gender } from '@/types';
+import { useDataStore } from '@/store/dataStore';
+import type { StudentProfile, RiskLevel, Gender, AssessmentDimension } from '@/types';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import {
@@ -28,36 +30,31 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  ArrowLeft,
+  FileEdit,
 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
   { label: '首页', href: '/dashboard' },
-  { label: '学生档案' },
+  { label: '学生档案', href: '/students' },
   { label: '重点关注名单' },
 ];
 
-type EnrollReason = 'warning_freq' | 'continuous_low' | 'severe_assessment' | 'manual';
+type EnrollReason = 'warning_freq' | 'continuous_low' | 'high_risk' | 'severe_assessment' | 'manual';
 
-interface FocusStudent {
-  id: string;
-  studentNo: string;
-  name: string;
-  gender: Gender;
-  college: string;
-  riskLevel: RiskLevel;
+interface FocusStudent extends StudentProfile {
   enrollReason: EnrollReason;
   enrollTime: string;
-  warningCountThisMonth: number;
-  consecutiveLowEmotionDays: number;
-  latestAssessmentLevel: string;
-  counselor: string;
   severity: 1 | 2 | 3;
-  phone: string;
+  latestAssessmentLevel: string;
+  consecutiveLowEmotionDays: number;
+  warningCountThisMonth: number;
 }
 
 const enrollReasonMap: Record<EnrollReason, { label: string; color: 'risk-high' | 'risk-medium' | 'risk-low' | 'primary' }> = {
-  warning_freq: { label: '预警频次≥2次/月', color: 'risk-high' },
+  warning_freq: { label: '预警频次≥2次', color: 'risk-high' },
   continuous_low: { label: '持续低情绪≥5天', color: 'risk-medium' },
+  high_risk: { label: '高风险等级', color: 'risk-high' },
   severe_assessment: { label: '测评结果重度', color: 'risk-high' },
   manual: { label: '手动添加', color: 'primary' },
 };
@@ -66,22 +63,9 @@ const enrollReasonOptions = [
   { value: '', label: '全部入册原因' },
   { value: 'warning_freq', label: '预警频次' },
   { value: 'continuous_low', label: '持续低情绪' },
+  { value: 'high_risk', label: '高风险' },
   { value: 'severe_assessment', label: '重度测评' },
   { value: 'manual', label: '手动添加' },
-];
-
-const collegeOptions = [
-  { value: '', label: '全部学院' },
-  { value: '计算机学院', label: '计算机学院' },
-  { value: '经济管理学院', label: '经济管理学院' },
-  { value: '文学院', label: '文学院' },
-  { value: '理学院', label: '理学院' },
-  { value: '工学院', label: '工学院' },
-  { value: '医学院', label: '医学院' },
-  { value: '法学院', label: '法学院' },
-  { value: '外国语学院', label: '外国语学院' },
-  { value: '艺术学院', label: '艺术学院' },
-  { value: '体育学院', label: '体育学院' },
 ];
 
 function getRiskBadgeColor(level: RiskLevel): 'risk-safe' | 'risk-low' | 'risk-medium' | 'risk-high' {
@@ -102,67 +86,130 @@ function getRiskText(level: RiskLevel): string {
   }
 }
 
-function generateMockFocusStudents(): FocusStudent[] {
-  const surnames = ['张', '王', '李', '赵', '刘', '陈', '杨', '黄', '周', '吴', '徐', '孙', '马', '朱', '胡', '林', '郭', '何', '高', '罗'];
-  const names = ['伟', '芳', '娜', '敏', '静', '丽', '强', '磊', '军', '洋', '勇', '艳', '杰', '涛', '明', '超', '华', '平', '辉', '鹏'];
-  const colleges = ['计算机学院', '经济管理学院', '文学院', '理学院', '工学院', '医学院', '法学院', '外国语学院', '艺术学院', '体育学院'];
-  const counselors = ['王老师', '李老师', '张老师', '刘老师', '陈老师', '杨老师', '黄老师', '周老师'];
-  const reasons: EnrollReason[] = ['warning_freq', 'continuous_low', 'severe_assessment', 'manual', 'warning_freq', 'continuous_low'];
-  const levels: RiskLevel[] = ['high', 'high', 'medium', 'medium', 'high', 'low'];
-  const assessmentLevels = ['重度抑郁', '重度焦虑', '中度抑郁', '中度焦虑', '重度压力', '轻度抑郁'];
+function getEnrollReason(student: StudentProfile, isFocused: boolean): EnrollReason {
+  if (isFocused && student.warningCount < 2 && student.riskLevel !== 'high') {
+    return 'manual';
+  }
+  if (student.warningCount >= 2) return 'warning_freq';
+  if (student.riskLevel === 'high') return 'high_risk';
+  if (student.currentEmotionIndex < 50) return 'continuous_low';
+  if (student.assessmentHistory && student.assessmentHistory.length > 0) {
+    const latest = student.assessmentHistory[0];
+    const dims: AssessmentDimension[] = ['depression', 'anxiety', 'stress', 'sleep', 'social'];
+    const hasSevere = dims.some(d => latest.dimensions[d]?.level === '重度');
+    if (hasSevere) return 'severe_assessment';
+  }
+  return 'high_risk';
+}
 
-  return Array.from({ length: 36 }, (_, i) => {
-    const reason = reasons[i % reasons.length];
-    const level = levels[i % levels.length];
-    const now = new Date();
-    now.setDate(now.getDate() - i * (2 + (i % 5)));
-    now.setHours(9 + (i % 8), (i * 13) % 60);
+function getSeverity(student: StudentProfile): 1 | 2 | 3 {
+  if (student.riskLevel === 'high' || student.warningCount >= 3) return 3;
+  if (student.riskLevel === 'medium' || student.warningCount >= 1) return 2;
+  return 1;
+}
 
-    return {
-      id: `FOCUS${String(1000 + i).padStart(6, '0')}`,
-      studentNo: `202${i % 5}${String(10000 + i).padStart(6, '0')}`,
-      name: `${surnames[i % surnames.length]}${names[(i + 7) % names.length]}`,
-      gender: (i % 2 === 0 ? '男' : '女') as Gender,
-      college: colleges[i % colleges.length],
-      riskLevel: level,
-      enrollReason: reason,
-      enrollTime: now.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
-      warningCountThisMonth: reason === 'warning_freq' ? 2 + (i % 4) : (i % 3),
-      consecutiveLowEmotionDays: reason === 'continuous_low' ? 5 + (i % 10) : (i % 5),
-      latestAssessmentLevel: reason === 'severe_assessment' ? assessmentLevels[i % assessmentLevels.length] : assessmentLevels[(i + 2) % assessmentLevels.length],
-      counselor: counselors[i % counselors.length],
-      severity: (level === 'high' ? (i % 2 === 0 ? 3 : 2) : 1) as 1 | 2 | 3,
-      phone: `1${3 + (i % 4)}${String(Math.floor(Math.random() * 100000000)).padStart(8, '0')}`,
-    };
-  }).sort((a, b) => b.severity - a.severity);
+function getLatestAssessmentLevel(student: StudentProfile): string {
+  if (!student.assessmentHistory || student.assessmentHistory.length === 0) {
+    return '暂无测评';
+  }
+  const latest = student.assessmentHistory[0];
+  const dims: AssessmentDimension[] = ['depression', 'anxiety', 'stress', 'sleep', 'social'];
+  const levelMap: Record<string, string> = {
+    '正常': '正常',
+    '轻度': '轻度抑郁',
+    '中度': '中度抑郁',
+    '重度': '重度抑郁',
+  };
+  const levels = dims.map(d => latest.dimensions[d]?.level || '正常');
+  if (levels.includes('重度')) return '重度抑郁';
+  if (levels.includes('中度')) return '中度抑郁';
+  if (levels.includes('轻度')) return '轻度抑郁';
+  return '正常';
+}
+
+function getConsecutiveLowDays(student: StudentProfile): number {
+  if (!student.emotionHistory || student.emotionHistory.length === 0) return 0;
+  let count = 0;
+  let maxCount = 0;
+  for (let i = student.emotionHistory.length - 1; i >= 0; i--) {
+    if (student.emotionHistory[i].value < 60) {
+      count++;
+      maxCount = Math.max(maxCount, count);
+    } else {
+      break;
+    }
+  }
+  return maxCount;
+}
+
+function getWarningCountThisMonth(student: StudentProfile): number {
+  if (!student.warningHistory || student.warningHistory.length === 0) return 0;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  return student.warningHistory.filter(w => new Date(w.createdAt) >= monthStart).length;
 }
 
 export default function FocusListPage() {
+  const navigate = useNavigate();
+  const { getFocusStudents, toggleFocusStudent, isFocusStudent, initializeData, students } = useDataStore();
+
   const [searchValue, setSearchValue] = useState('');
   const [reason, setReason] = useState('');
   const [college, setCollege] = useState('');
-  const [timeRange, setTimeRange] = useState('30d');
+  const [timeRange, setTimeRange] = useState('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [releaseModalOpen, setReleaseModalOpen] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<FocusStudent | null>(null);
+  const [referralModalOpen, setReferralModalOpen] = useState(false);
 
-  const mockStudents = useMemo(() => generateMockFocusStudents(), []);
+  useEffect(() => {
+    initializeData();
+  }, [initializeData]);
+
+  const collegeOptions = useMemo(() => {
+    const colleges = new Set(students.map(s => s.college));
+    return [
+      { value: '', label: '全部学院' },
+      ...Array.from(colleges).map(c => ({ value: c, label: c })),
+    ];
+  }, [students]);
+
+  const focusStudents = useMemo((): FocusStudent[] => {
+    const focusList = getFocusStudents();
+    return focusList.map(student => {
+      const isFocused = isFocusStudent(student.id);
+      return {
+        ...student,
+        enrollReason: getEnrollReason(student, isFocused),
+        enrollTime: student.assessmentHistory?.[0]?.assessmentDate || student.warningHistory?.[0]?.createdAt || '未知',
+        severity: getSeverity(student),
+        latestAssessmentLevel: getLatestAssessmentLevel(student),
+        consecutiveLowEmotionDays: getConsecutiveLowDays(student),
+        warningCountThisMonth: getWarningCountThisMonth(student),
+      };
+    }).sort((a, b) => b.severity - a.severity);
+  }, [getFocusStudents, isFocusStudent]);
 
   const stats = useMemo(() => {
     const today = new Date();
     const weekAgo = new Date(today.getTime() - 7 * 86400000);
+    const newThisWeek = focusStudents.filter(s => {
+      if (s.enrollTime === '未知') return false;
+      return new Date(s.enrollTime) >= weekAgo;
+    }).length;
+    
     return {
-      current: mockStudents.length,
-      newThisWeek: mockStudents.filter((s) => new Date(s.enrollTime) >= weekAgo).length,
-      released: Math.floor(mockStudents.length * 0.35),
+      current: focusStudents.length,
+      newThisWeek,
+      released: Math.floor(students.length * 0.1),
       avgCycle: '18.5',
     };
-  }, [mockStudents]);
+  }, [focusStudents, students.length]);
 
   const filteredStudents = useMemo(() => {
-    return mockStudents.filter((s) => {
+    return focusStudents.filter((s) => {
       if (reason && s.enrollReason !== reason) return false;
       if (college && s.college !== college) return false;
       if (searchValue) {
@@ -175,7 +222,7 @@ export default function FocusListPage() {
       }
       return true;
     });
-  }, [mockStudents, reason, college, searchValue]);
+  }, [focusStudents, reason, college, searchValue]);
 
   const totalPages = Math.ceil(filteredStudents.length / pageSize);
   const pageData = filteredStudents.slice((page - 1) * pageSize, page * pageSize);
@@ -190,15 +237,19 @@ export default function FocusListPage() {
       入册原因: enrollReasonMap[s.enrollReason].label,
       入册时间: s.enrollTime,
       '本月预警次数': s.warningCountThisMonth,
-      '连续低情绪天数': s.consecutiveLowEmotionDays,
+      '持续低情绪天数': s.consecutiveLowEmotionDays,
       '最近测评等级': s.latestAssessmentLevel,
       辅导员: s.counselor,
-      联系电话: s.phone,
+      联系电话: s.phone || '',
     }));
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '重点关注名单');
     XLSX.writeFile(wb, `重点关注名单_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleViewDetail = (id: string) => {
+    navigate(`/students/${id}`);
   };
 
   const handleReleaseClick = (student: FocusStudent) => {
@@ -208,16 +259,32 @@ export default function FocusListPage() {
   };
 
   const handleConfirmRelease = () => {
-    if (!releaseReason.trim()) return;
-    alert(`已解除对 ${selectedStudent?.name} 的重点关注`);
+    if (!releaseReason.trim() || !selectedStudent) return;
+    toggleFocusStudent(selectedStudent.id);
     setReleaseModalOpen(false);
     setSelectedStudent(null);
     setReleaseReason('');
+    setPage(1);
+  };
+
+  const handleReferralClick = (student: FocusStudent) => {
+    setSelectedStudent(student);
+    setReferralModalOpen(true);
   };
 
   return (
     <MainLayout breadcrumbs={breadcrumbs}>
       <div className="space-y-6 stagger-reveal">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-primary-600 transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            返回
+          </button>
+        </div>
+
         <Card className="border-warning-high/20 bg-gradient-to-r from-warning-high/5 via-warning-low/5 to-transparent">
           <CardContent className="p-4 lg:p-5 flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-warning-high/15 flex items-center justify-center shrink-0">
@@ -240,6 +307,11 @@ export default function FocusListPage() {
                   <Activity className="h-3.5 w-3.5 text-warning-high" />
                   测评结果为重度
                 </span>
+                <span className="text-ink-300">或</span>
+                <span className="flex items-center gap-1.5">
+                  <Star className="h-3.5 w-3.5 text-primary-500" />
+                  高风险等级
+                </span>
               </div>
             </div>
           </CardContent>
@@ -252,9 +324,7 @@ export default function FocusListPage() {
             suffix="人"
             color="danger"
             icon={<Users className="h-6 w-6" />}
-            trendValue="+3.1%"
-            trendType="up"
-            description="较上周"
+            description="重点关注学生总数"
           />
           <StatCard
             title="本周新增"
@@ -262,9 +332,7 @@ export default function FocusListPage() {
             suffix="人"
             color="warning"
             icon={<UserPlus className="h-6 w-6" />}
-            trendValue="+2"
-            trendType="up"
-            description="较上周"
+            description="较上周新增"
           />
           <StatCard
             title="已解除关注"
@@ -272,9 +340,7 @@ export default function FocusListPage() {
             suffix="人"
             color="mint"
             icon={<CheckCircle2 className="h-6 w-6" />}
-            trendValue="+12.5%"
-            trendType="up"
-            description="较上月"
+            description="累计解除"
           />
           <StatCard
             title="平均关注周期"
@@ -282,9 +348,7 @@ export default function FocusListPage() {
             suffix="天"
             color="primary"
             icon={<Clock className="h-6 w-6" />}
-            trendValue="-2.3天"
-            trendType="down"
-            description="较上月"
+            description="平均关注时长"
           />
         </div>
 
@@ -412,10 +476,11 @@ export default function FocusListPage() {
                     <tr
                       key={student.id}
                       className={cn(
-                        'border-b border-ink-50 transition-all duration-200 hover:bg-primary-50/30 group',
+                        'border-b border-ink-50 transition-all duration-200 hover:bg-primary-50/30 group cursor-pointer',
                         isCritical && 'bg-warning-high/5'
                       )}
                       style={{ animationDelay: `${idx * 0.02}s` }}
+                      onClick={() => handleViewDetail(student.id)}
                     >
                       <td className="px-4 py-3.5">
                         {student.severity === 3 ? (
@@ -501,8 +566,9 @@ export default function FocusListPage() {
                         <span className="text-ink-600 whitespace-nowrap">{student.counselor}</span>
                       </td>
                       <td className="px-4 py-3.5 sticky right-0 bg-inherit group-hover:bg-primary-50/60">
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                           <button
+                            onClick={() => handleViewDetail(student.id)}
                             className="p-1.5 rounded-lg text-primary-500 hover:bg-primary-50 transition-colors"
                             title="查看详情"
                           >
@@ -516,6 +582,7 @@ export default function FocusListPage() {
                             <XCircle className="h-4 w-4" />
                           </button>
                           <button
+                            onClick={() => handleReferralClick(student)}
                             className="p-1.5 rounded-lg text-warning-low hover:bg-warning-low/10 transition-colors"
                             title="转介建议"
                           >
@@ -606,7 +673,7 @@ export default function FocusListPage() {
         </Card>
 
         {releaseModalOpen && selectedStudent && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-fade-in-up">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-fade-in">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden animate-slide-in">
               <div className="p-6">
                 <div className="flex items-start gap-4">
@@ -664,11 +731,110 @@ export default function FocusListPage() {
                   className={cn(
                     'px-5 py-2 rounded-xl text-white text-sm font-medium shadow-md transition-all',
                     releaseReason.trim()
-                      ? 'bg-gradient-mint hover:shadow-lg hover:-translate-y-0.5'
+                      ? 'bg-gradient-to-r from-mint-500 to-mint-600 hover:shadow-lg hover:-translate-y-0.5'
                       : 'bg-ink-300 cursor-not-allowed shadow-none'
                   )}
                 >
                   确认解除
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {referralModalOpen && selectedStudent && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden animate-slide-in">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-ink-100">
+                <h3 className="text-lg font-bold text-ink-800 flex items-center gap-2">
+                  <ArrowRightLeft className="h-5 w-5 text-warning-low" />
+                  转介建议
+                </h3>
+                <button
+                  onClick={() => {
+                    setReferralModalOpen(false);
+                    setSelectedStudent(null);
+                  }}
+                  className="p-2 rounded-lg hover:bg-ink-100 text-ink-400 hover:text-ink-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="p-4 rounded-xl bg-warning-low/10 border border-warning-low/20">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-lg bg-warning-low/20 flex items-center justify-center">
+                      <FileEdit className="h-5 w-5 text-warning-low" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-ink-800">{selectedStudent.name}</div>
+                      <div className="text-xs text-ink-500">{selectedStudent.studentNo} · {selectedStudent.college}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-ink-500 text-xs">风险等级</span>
+                      <Badge color={getRiskBadgeColor(selectedStudent.riskLevel)} size="sm" withDot className="ml-2">
+                        {getRiskText(selectedStudent.riskLevel)}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="text-ink-500 text-xs">入册原因</span>
+                      <span className="ml-2 text-ink-700 text-sm">{enrollReasonMap[selectedStudent.enrollReason].label}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-ink-700">建议转介方案</h4>
+                  <div className="space-y-2">
+                    {[
+                      { title: '校心理咨询中心个体咨询', desc: '建议每周1-2次，持续8周', recommended: true },
+                      { title: '团体心理辅导', desc: '人际关系成长小组，每周1次', recommended: false },
+                      { title: '精神科医院评估', desc: '建议到三甲医院精神科进一步诊断', recommended: selectedStudent.severity === 3 },
+                      { title: '辅导员日常关注', desc: '增加谈心谈话频次，加强日常关怀', recommended: true },
+                      { title: '家校联动', desc: '与家长沟通，共同关注学生状态', recommended: selectedStudent.severity >= 2 },
+                    ].map((item, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          'p-3 rounded-xl border transition-all',
+                          item.recommended
+                            ? 'bg-primary-50/60 border-primary-200/60'
+                            : 'bg-ink-50/50 border-ink-100'
+                        )}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          {item.recommended && (
+                            <Badge color="primary" size="sm" variant="soft">推荐</Badge>
+                          )}
+                          <span className="font-medium text-ink-800 text-sm">{item.title}</span>
+                        </div>
+                        <p className="text-xs text-ink-500 ml-0">{item.desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 px-6 py-4 bg-ink-50 border-t border-ink-100">
+                <button
+                  onClick={() => {
+                    setReferralModalOpen(false);
+                    setSelectedStudent(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-white border border-ink-200 text-ink-600 text-sm font-medium hover:bg-ink-100 transition-colors"
+                >
+                  关闭
+                </button>
+                <button
+                  onClick={() => {
+                    alert('转介建议已记录（模拟）');
+                    setReferralModalOpen(false);
+                    setSelectedStudent(null);
+                  }}
+                  className="btn-primary text-sm"
+                >
+                  确认转介
                 </button>
               </div>
             </div>

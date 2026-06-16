@@ -4,6 +4,7 @@ export interface WarningFilter {
   level?: string
   status?: string
   keyword?: string
+  riskLevel?: string
 }
 
 export interface Notification {

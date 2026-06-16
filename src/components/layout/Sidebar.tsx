@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Shield,
   LayoutDashboard,
@@ -15,6 +15,9 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/authStore';
+import { useMenuItems } from '@/hooks/usePermission';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 type SubMenuItem = {
   label: string;
@@ -28,34 +31,95 @@ type MenuItem = {
   children?: SubMenuItem[];
 };
 
-const menuItems: MenuItem[] = [
-  { label: '核心看板', key: 'dashboard', icon: LayoutDashboard },
-  { label: '预警管理', key: 'alerts', icon: AlertTriangle },
-  {
-    label: '学生档案',
-    key: 'students',
-    icon: Users,
-    children: [
-      { label: '档案列表', key: 'students-list' },
-      { label: '批量上传', key: 'students-upload' },
-      { label: '重点关注', key: 'students-focus' },
-    ],
-  },
-  { label: '学校详情', key: 'schools', icon: Building2 },
-  { label: '周报系统', key: 'reports', icon: FileBarChart2 },
-  { label: '系统设置', key: 'settings', icon: Settings },
-];
+const iconMap: Record<string, React.ComponentType<{ className?: string; strokeWidth?: string | number }>> = {
+  LayoutDashboard,
+  AlertTriangle,
+  Users,
+  Building2,
+  FileBarChart2,
+  Settings,
+};
 
-const currentUser = {
-  name: '张管理',
-  role: '系统管理员',
-  avatar: null,
+const roleNameMap: Record<string, string> = {
+  ministry: '教育部管理员',
+  province: '省教育厅管理员',
+  school: '学校管理员',
+  center: '心理咨询中心',
+  liaison: '心理联络员',
+  counselor: '辅导员',
+};
+
+const keyToPathMap: Record<string, string> = {
+  'dashboard': '/dashboard',
+  'alerts': '/warning',
+  'students-list': '/students',
+  'students-upload': '/students/upload',
+  'students-focus': '/students/focus',
+  'schools': '/dashboard',
+  'reports': '/reports',
+  'settings': '/settings',
 };
 
 export function Sidebar() {
-  const [activeKey, setActiveKey] = useState('dashboard');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  const { items: menuItemConfig, firstKey } = useMenuItems();
+
+  const menuItems = useMemo<MenuItem[]>(() => {
+    return menuItemConfig.map((item) => ({
+      ...item,
+      icon: iconMap[item.icon] || LayoutDashboard,
+    }));
+  }, [menuItemConfig]);
+
+  const [activeKey, setActiveKey] = useState(firstKey);
   const [expandedKeys, setExpandedKeys] = useState<string[]>(['students']);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    const path = location.pathname;
+    let foundKey = firstKey;
+    let foundParentKey: string | null = null;
+
+    for (const item of menuItems) {
+      if (item.children) {
+        for (const child of item.children) {
+          const childPath = keyToPathMap[child.key];
+          if (childPath && (path === childPath || path.startsWith(childPath + '/'))) {
+            foundKey = child.key;
+            foundParentKey = item.key;
+            break;
+          }
+        }
+        if (foundParentKey) break;
+      } else {
+        const itemPath = keyToPathMap[item.key];
+        if (itemPath && (path === itemPath || path.startsWith(itemPath + '/'))) {
+          foundKey = item.key;
+          break;
+        }
+      }
+    }
+
+    setActiveKey(foundKey);
+
+    if (foundParentKey && !expandedKeys.includes(foundParentKey)) {
+      setExpandedKeys((prev) => [...prev, foundParentKey!]);
+    }
+  }, [location.pathname, menuItems, firstKey, expandedKeys]);
+
+  const currentUser = useMemo(() => {
+    if (!user) {
+      return { name: '未登录', role: '访客', avatar: null };
+    }
+    return {
+      name: user.name,
+      role: roleNameMap[user.role] || user.role,
+      avatar: user.avatar || null,
+    };
+  }, [user]);
 
   const toggleExpand = (key: string) => {
     setExpandedKeys((prev) =>
@@ -68,11 +132,25 @@ export function Sidebar() {
       toggleExpand(item.key);
     } else {
       setActiveKey(item.key);
+      const path = keyToPathMap[item.key];
+      if (path) {
+        navigate(path);
+      }
+      setMobileOpen(false);
     }
   };
 
   const handleSubMenuClick = (key: string) => {
     setActiveKey(key);
+    const path = keyToPathMap[key];
+    if (path) {
+      navigate(path);
+    }
+    setMobileOpen(false);
+  };
+
+  const handleLogout = () => {
+    logout();
   };
 
   const SidebarContent = (
@@ -188,6 +266,7 @@ export function Sidebar() {
             </p>
           </div>
           <button
+            onClick={handleLogout}
             className="shrink-0 rounded-lg p-2 text-blue-200/60 hover:bg-white/10 hover:text-white transition-all"
             title="退出登录"
           >

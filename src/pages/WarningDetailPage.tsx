@@ -1,12 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout, type BreadcrumbItem } from '@/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { StatCard } from '@/components/ui/StatCard';
 import { Loading } from '@/components/ui/Loading';
 import { cn } from '@/lib/utils';
-import type { WarningRecord, StudentProfile, AssessmentRecord, InterventionType, ApprovalRecord, RiskLevel } from '@/types';
+import { useDataStore } from '@/store/dataStore';
+import { useAuthStore } from '@/store/authStore';
+import { useAppStore } from '@/store/appStore';
+import type { WarningRecord, StudentProfile, InterventionType, ApprovalRecord, RiskLevel } from '@/types';
 import ReactECharts from 'echarts-for-react';
 import {
   ArrowLeft,
@@ -50,193 +52,114 @@ const interventionTypeMap: Record<InterventionType, { label: string; icon: any; 
   other: { label: '其他', icon: FileText, color: 'risk-medium' },
 };
 
-function generateMockDetail(): { warning: WarningRecord; student: StudentProfile } {
-  const emotionHistory = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (13 - i));
-    const base = 45 + (i >= 10 ? -10 : Math.sin(i / 2) * 10);
-    return {
-      date: d.toISOString().split('T')[0],
-      value: Math.max(30, Math.min(85, Math.round(base + (Math.random() - 0.5) * 8))),
-      source: (['social', 'app_usage', 'counsel', 'assessment'] as const)[i % 4],
-    };
-  });
-
-  const assessment: AssessmentRecord = {
-    id: 'ASM000128',
-    studentId: 'STU100008',
-    assessmentName: 'SCL-90症状自评量表',
-    assessmentDate: '2026-06-10',
-    overallScore: 68,
-    dimensions: {
-      depression: { score: 72, level: '中度' },
-      anxiety: { score: 65, level: '轻度' },
-      stress: { score: 58, level: '轻度' },
-      sleep: { score: 48, level: '正常' },
-      social: { score: 55, level: '轻度' },
-    },
-    conclusion: '受测者近期存在中度抑郁倾向，伴有轻度焦虑和压力感受，建议进行心理咨询介入。',
-    isRetest: false,
-  };
-
-  const interventions = [
-    {
-      id: 'INT001',
-      warningId: 'WRN20260008',
-      type: 'counsel' as InterventionType,
-      typeName: '约谈',
-      operatorId: 'OP001',
-      operatorName: '王辅导员',
-      description: '初次约谈，学生主诉学业压力大，对未来感到迷茫，睡眠质量下降。已建立信任关系，约定下周继续跟进。',
-      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-    },
-    {
-      id: 'INT002',
-      warningId: 'WRN20260008',
-      type: 'follow_up' as InterventionType,
-      typeName: '随访',
-      operatorId: 'OP001',
-      operatorName: '王辅导员',
-      description: '电话随访，学生反馈情绪略有好转，但仍存在失眠情况。建议调整作息并进行适度运动。',
-      createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
-    },
-  ];
-
-  const approvals: ApprovalRecord[] = [
-    {
-      id: 'APR001',
-      warningId: 'WRN20260008',
-      stage: 1,
-      stageName: '辅导员确认',
-      approverId: 'U001',
-      approverName: '王辅导员',
-      approverRole: 'counselor',
-      status: 'approved',
-      comment: '已与学生面谈，情况属实，同意升级为二级预警。建议院系关注并介入。',
-      createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    },
-    {
-      id: 'APR002',
-      warningId: 'WRN20260008',
-      stage: 2,
-      stageName: '院系联络员复核',
-      approverId: 'U002',
-      approverName: '李联络员',
-      approverRole: 'liaison',
-      status: 'pending',
-      createdAt: new Date(Date.now() - 86400000).toISOString(),
-    },
-    {
-      id: 'APR003',
-      warningId: 'WRN20260008',
-      stage: 3,
-      stageName: '校心理中心批准',
-      approverId: 'U003',
-      approverName: '-',
-      approverRole: 'center',
-      status: 'pending',
-      createdAt: '',
-    },
-  ];
-
-  const warning: WarningRecord = {
-    id: 'WRN20260008',
-    studentId: 'STU100008',
-    studentName: '李明轩',
-    schoolId: 'SCH0001',
-    schoolName: '清华大学',
-    college: '计算机学院',
-    major: '软件工程',
-    grade: '大三',
-    level: 2,
-    riskLevel: 'high',
-    triggerType: 'composite',
-    triggerReason: '连续3天情绪指数低于阈值 + SDS测评中度抑郁 + 夜间异常行为',
-    emotionIndex: 42,
-    depressionScore: 68,
-    createdAt: new Date(Date.now() - 86400000 * 4).toISOString(),
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-    status: 'processing',
-    statusText: '处理中',
-    approvalStage: 2,
-    approvals,
-    interventions,
-  };
-
-  const student: StudentProfile = {
-    id: 'STU100008',
-    name: '李明轩',
-    gender: '男',
-    age: 21,
-    studentNo: '2023010892',
-    schoolId: 'SCH0001',
-    schoolName: '清华大学',
-    college: '计算机学院',
-    major: '软件工程',
-    grade: '大三',
-    className: '软工2303班',
-    phone: '138****6682',
-    counselor: '王老师',
-    currentEmotionIndex: 42,
-    riskLevel: 'high',
-    warningCount: 3,
-    assessmentHistory: [assessment],
-    emotionHistory,
-    warningHistory: [warning],
-    tags: ['学业压力', '社交退缩', '失眠'],
-  };
-
-  return { warning, student };
-}
-
-function generateSimilarStudents(): Array<{ id: string; name: string; college: string; riskLevel: RiskLevel; similarity: number }> {
-  const names = ['陈思远', '刘子豪', '赵雨桐', '孙雅琪', '周天宇'];
-  const colleges = ['计算机学院', '经济管理学院', '工学院'];
-  const levels: RiskLevel[] = ['medium', 'high', 'medium', 'high', 'medium'];
-  return names.map((name, i) => ({
-    id: `STU${100020 + i}`,
-    name,
-    college: colleges[i % colleges.length],
-    riskLevel: levels[i],
-    similarity: 78 + Math.floor(Math.random() * 18),
-  }));
-}
-
-function generateHistoryWarnings(): Array<{ id: string; level: number; time: string; status: string; trigger: string }> {
-  return [
-    { id: 'WRN20250892', level: 1, time: '2025-11-15', status: '已处置', trigger: '情绪异常' },
-    { id: 'WRN20260156', level: 1, time: '2026-02-28', status: '已关闭', trigger: '测评异常' },
-  ];
-}
+const STAGE_NAMES: Record<number, string> = {
+  1: '辅导员确认',
+  2: '联络员复核',
+  3: '心理中心批准',
+};
 
 export default function WarningDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [loading] = useState(false);
+  const user = useAuthStore((state) => state.user);
+  const addNotification = useAppStore((state) => state.addNotification);
+
+  const initializeData = useDataStore((state) => state.initializeData);
+  const getWarningById = useDataStore((state) => state.getWarningById);
+  const getStudentById = useDataStore((state) => state.getStudentById);
+  const approveWarningStage = useDataStore((state) => state.approveWarningStage);
+  const addIntervention = useDataStore((state) => state.addIntervention);
+  const isFocusStudent = useDataStore((state) => state.isFocusStudent);
+  const toggleFocusStudent = useDataStore((state) => state.toggleFocusStudent);
+  const resolveWarning = useDataStore((state) => state.resolveWarning);
+  const warnings = useDataStore((state) => state.warnings);
+
+  const [loading, setLoading] = useState(true);
   const [selectedInterventionType, setSelectedInterventionType] = useState<InterventionType>('counsel');
   const [interventionDesc, setInterventionDesc] = useState('');
   const [approvalComment, setApprovalComment] = useState('');
-  const [currentRole] = useState<'counselor' | 'liaison' | 'center'>('liaison');
+  const [showContactModal, setShowContactModal] = useState(false);
 
-  const { warning, student } = useMemo(() => generateMockDetail(), [id]);
-  const similarStudents = useMemo(() => generateSimilarStudents(), []);
-  const historyWarnings = useMemo(() => generateHistoryWarnings(), []);
+  useEffect(() => {
+    initializeData();
+    const timer = setTimeout(() => setLoading(false), 300);
+    return () => clearTimeout(timer);
+  }, [initializeData]);
+
+  const warning = useMemo<WarningRecord | undefined>(() => {
+    if (!id) return undefined;
+    return getWarningById(id);
+  }, [id, getWarningById, warnings]);
+
+  const student = useMemo<StudentProfile | undefined>(() => {
+    if (!warning) return undefined;
+    return getStudentById(warning.studentId);
+  }, [warning, getStudentById]);
+
+  const isFocused = useMemo(() => {
+    if (!warning) return false;
+    return isFocusStudent(warning.studentId);
+  }, [warning, isFocusStudent]);
 
   const breadcrumbs: BreadcrumbItem[] = [
     { label: '首页', href: '/dashboard' },
     { label: '预警管理', href: '/warning' },
-    { label: `预警详情 - ${warning.id}` },
+    { label: `预警详情 - ${warning?.id || ''}` },
   ];
 
   const riskScore = useMemo(() => {
+    if (!warning) return 0;
     return Math.round(warning.depressionScore * 0.4 + (100 - warning.emotionIndex) * 0.35 + warning.level * 15);
   }, [warning]);
 
-  const currentStage = warning.approvalStage || 0;
-  const myStage = currentRole === 'counselor' ? 1 : currentRole === 'liaison' ? 2 : 3;
-  const canApprove = currentStage === myStage;
+  const currentStage = warning?.approvalStage || 0;
+
+  const myStage = useMemo(() => {
+    if (!user) return 0;
+    switch (user.role) {
+      case 'counselor':
+        return 1;
+      case 'liaison':
+        return 2;
+      case 'center':
+      case 'school':
+        return 3;
+      default:
+        return 0;
+    }
+  }, [user]);
+
+  const canApprove = currentStage === myStage && currentStage > 0 && warning?.status !== 'rejected' && warning?.status !== 'resolved';
+
+  const approvals = useMemo<ApprovalRecord[]>(() => {
+    if (!warning) return [];
+
+    const stages: ApprovalRecord[] = [];
+    for (let i = 1; i <= 3; i++) {
+      const existing = warning.approvals.find((a) => a.stage === i);
+      if (existing) {
+        stages.push(existing);
+      } else {
+        stages.push({
+          id: `${warning.id}-stage${i}`,
+          warningId: warning.id,
+          stage: i as 1 | 2 | 3,
+          stageName: STAGE_NAMES[i] || `阶段${i}`,
+          approverId: '',
+          approverName: '-',
+          approverRole: '',
+          status: 'pending',
+          createdAt: '',
+        });
+      }
+    }
+    return stages;
+  }, [warning]);
 
   const emotionChartOption = useMemo(() => {
+    if (!student || !student.emotionHistory || student.emotionHistory.length === 0) {
+      return {};
+    }
     const dates = student.emotionHistory.map((e) => e.date.slice(5));
     const values = student.emotionHistory.map((e) => e.value);
     return {
@@ -292,6 +215,9 @@ export default function WarningDetailPage() {
   }, [student]);
 
   const radarChartOption = useMemo(() => {
+    if (!student || !student.assessmentHistory || student.assessmentHistory.length === 0) {
+      return {};
+    }
     const dims = student.assessmentHistory[0]?.dimensions;
     if (!dims) return {};
     return {
@@ -336,19 +262,163 @@ export default function WarningDetailPage() {
   }, [student]);
 
   const handleSubmitIntervention = () => {
-    if (!interventionDesc.trim()) return;
-    alert(`干预记录已提交：${interventionTypeMap[selectedInterventionType].label}`);
+    if (!interventionDesc.trim() || !warning) return;
+    if (!user) return;
+
+    addIntervention(warning.id, {
+      type: selectedInterventionType,
+      typeName: interventionTypeMap[selectedInterventionType].label,
+      operatorId: user.id,
+      operatorName: user.name,
+      description: interventionDesc.trim(),
+    });
+
+    addNotification({
+      type: 'success',
+      title: '提交成功',
+      message: `${interventionTypeMap[selectedInterventionType].label}记录已添加`,
+    });
+
     setInterventionDesc('');
   };
 
   const handleApproval = (approved: boolean) => {
-    if (!canApprove) return;
-    alert(`${approved ? '通过' : '驳回'}成功：${approvalComment || '无意见'}`);
-    setApprovalComment('');
+    if (!canApprove || !warning || !user) return;
+
+    const stage = myStage as 1 | 2 | 3;
+    const success = approveWarningStage(
+      warning.id,
+      stage,
+      user.id,
+      user.name,
+      approvalComment.trim(),
+      approved
+    );
+
+    if (success) {
+      addNotification({
+        type: 'success',
+        title: approved ? '审批通过' : '审批驳回',
+        message: `预警 ${warning.id} ${approved ? '已通过' : '已驳回'}`,
+      });
+      setApprovalComment('');
+    } else {
+      addNotification({
+        type: 'error',
+        title: '操作失败',
+        message: '审批操作失败，请重试',
+      });
+    }
+  };
+
+  const handleStudentClick = () => {
+    if (warning) {
+      navigate(`/students/${warning.studentId}`);
+    }
+  };
+
+  const handleSendNotification = () => {
+    if (!warning) return;
+    addNotification({
+      type: 'info',
+      title: '通知已发送',
+      message: `已向 ${warning.studentName} 的辅导员发送通知`,
+    });
+  };
+
+  const handleContactStudent = () => {
+    setShowContactModal(true);
+  };
+
+  const handleToggleFocus = () => {
+    if (!warning) return;
+    toggleFocusStudent(warning.studentId);
+    const focused = isFocusStudent(warning.studentId);
+    addNotification({
+      type: 'success',
+      title: focused ? '已添加到重点关注' : '已取消重点关注',
+      message: focused ? `${warning.studentName} 已加入重点关注列表` : `${warning.studentName} 已移出重点关注列表`,
+    });
+  };
+
+  const handleExportReport = () => {
+    if (!warning) return;
+
+    const reportContent = `
+预警处置报告
+=============
+
+预警编号: ${warning.id}
+学生姓名: ${warning.studentName}
+学校: ${warning.schoolName}
+学院: ${warning.college}
+年级专业: ${warning.grade} / ${warning.major}
+预警等级: ${warning.level === 1 ? '一级' : '二级'}
+风险等级: ${warning.riskLevel}
+触发类型: ${warning.triggerType}
+触发原因: ${warning.triggerReason}
+情绪指数: ${warning.emotionIndex}
+抑郁得分: ${warning.depressionScore}
+生成时间: ${new Date(warning.createdAt).toLocaleString('zh-CN')}
+当前状态: ${warning.statusText}
+
+审批记录:
+${warning.approvals.map((a) => `
+  阶段${a.stage} - ${a.stageName}
+  审批人: ${a.approverName}
+  状态: ${a.status === 'approved' ? '通过' : a.status === 'rejected' ? '驳回' : '待处理'}
+  时间: ${a.createdAt || '未处理'}
+  意见: ${a.comment || '无'}
+`).join('')}
+
+干预记录:
+${warning.interventions.map((iv) => `
+  类型: ${iv.typeName}
+  操作人: ${iv.operatorName}
+  时间: ${new Date(iv.createdAt).toLocaleString('zh-CN')}
+  描述: ${iv.description}
+`).join('')}
+
+---
+报告生成时间: ${new Date().toLocaleString('zh-CN')}
+    `.trim();
+
+    const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `处置报告_${warning.id}_${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    addNotification({
+      type: 'success',
+      title: '导出成功',
+      message: '处置报告已导出',
+    });
   };
 
   if (loading) {
     return <MainLayout breadcrumbs={breadcrumbs}><div className="p-16"><Loading /></div></MainLayout>;
+  }
+
+  if (!warning) {
+    return (
+      <MainLayout breadcrumbs={breadcrumbs}>
+        <div className="p-16 text-center">
+          <AlertCircle className="h-16 w-16 mx-auto mb-4 text-ink-300" />
+          <p className="text-ink-500">未找到预警记录</p>
+          <button
+            onClick={() => navigate('/warning')}
+            className="mt-4 btn-primary"
+          >
+            返回预警列表
+          </button>
+        </div>
+      </MainLayout>
+    );
   }
 
   return (
@@ -376,20 +446,23 @@ export default function WarningDetailPage() {
           <div className="xl:col-span-[65%] space-y-6">
             <Card>
               <CardContent className="p-6">
-                <div className="flex flex-col sm:flex-row gap-6">
+                <div
+                  className="flex flex-col sm:flex-row gap-6 cursor-pointer group"
+                  onClick={handleStudentClick}
+                >
                   <div className="flex items-center gap-5">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-400 to-primary-600 shadow-lg shrink-0">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-400 to-primary-600 shadow-lg shrink-0 group-hover:scale-105 transition-transform">
                       <User className="h-10 w-10 text-white" />
                     </div>
                     <div className="space-y-1">
-                      <h2 className="text-xl font-bold text-ink-900">{student.name}</h2>
+                      <h2 className="text-xl font-bold text-ink-900">{student?.name || warning.studentName}</h2>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm text-ink-500">{student.gender} · {student.age}岁</span>
+                        <span className="text-sm text-ink-500">{student?.gender || '-'} · {student?.age || '-'}岁</span>
                         <span className="text-ink-200">|</span>
-                        <span className="text-sm font-mono text-ink-500">{student.studentNo}</span>
+                        <span className="text-sm font-mono text-ink-500">{student?.studentNo || '-'}</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5 pt-1">
-                        {student.tags.map((tag) => (
+                        {(student?.tags || []).map((tag) => (
                           <span key={tag} className="px-2 py-0.5 text-xs rounded-md bg-warning-low/10 text-warning-low border border-warning-low/20">
                             {tag}
                           </span>
@@ -401,28 +474,31 @@ export default function WarningDetailPage() {
                   <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-3 sm:border-l sm:border-ink-100 sm:pl-6 text-sm">
                     <div className="flex items-center gap-2 text-ink-600">
                       <School className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span>{student.schoolName}</span>
+                      <span>{student?.schoolName || warning.schoolName}</span>
                     </div>
                     <div className="flex items-center gap-2 text-ink-600">
                       <Building2 className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span>{student.college}</span>
+                      <span>{student?.college || warning.college}</span>
                     </div>
                     <div className="flex items-center gap-2 text-ink-600">
                       <GraduationCap className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span>{student.grade} · {student.major}</span>
+                      <span>{student?.grade || warning.grade} · {student?.major || warning.major}</span>
                     </div>
                     <div className="flex items-center gap-2 text-ink-600">
                       <Users className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span>{student.className}</span>
+                      <span>{student?.className || '-'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-ink-600">
                       <UserCheck className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span>辅导员：{student.counselor}</span>
+                      <span>辅导员：{student?.counselor || '-'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-ink-600">
                       <Phone className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span>{student.phone}</span>
+                      <span>{student?.phone || '-'}</span>
                     </div>
+                  </div>
+                  <div className="hidden sm:flex items-center text-primary-500 text-sm font-medium">
+                    查看详情 →
                   </div>
                 </div>
               </CardContent>
@@ -469,10 +545,7 @@ export default function WarningDetailPage() {
                     <div>
                       <p className="text-sm font-semibold text-ink-800 mb-1">详细触发条件</p>
                       <p className="text-sm text-ink-600 leading-relaxed">
-                        连续3天情绪指数：<span className="font-semibold text-warning-high">42 / 38 / 41</span>，低于阈值 <span className="font-semibold">50</span>；
-                        最新SDS测评得分 <span className="font-semibold text-warning-high">68分（中度抑郁）</span>；
-                        门禁记录显示连续 <span className="font-semibold text-warning-high">3天</span> 凌晨2点后返校。
-                        综合触发 <span className="font-semibold text-warning-high">二级预警</span>，建议立即介入。
+                        {warning.triggerReason}
                       </p>
                     </div>
                   </div>
@@ -500,14 +573,14 @@ export default function WarningDetailPage() {
                   测评结果摘要
                 </CardTitle>
                 <CardDescription>
-                  {student.assessmentHistory[0]?.assessmentName} · {student.assessmentHistory[0]?.assessmentDate}
+                  {student?.assessmentHistory?.[0]?.assessmentName || '暂无测评数据'} · {student?.assessmentHistory?.[0]?.assessmentDate || ''}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <ReactECharts option={radarChartOption} style={{ height: 280 }} notMerge lazyUpdate />
                   <div className="space-y-3">
-                    {student.assessmentHistory[0] && Object.entries(student.assessmentHistory[0].dimensions).map(([key, dim]) => {
+                    {student?.assessmentHistory?.[0] && Object.entries(student.assessmentHistory[0].dimensions).map(([key, dim]) => {
                       const labels: Record<string, string> = { depression: '抑郁水平', anxiety: '焦虑水平', stress: '压力感知', sleep: '睡眠质量', social: '社会功能' };
                       const color = dim.level === '正常' ? 'bg-risk-safe' : dim.level === '轻度' ? 'bg-risk-low' : dim.level === '中度' ? 'bg-risk-medium' : 'bg-risk-high';
                       return (
@@ -525,10 +598,18 @@ export default function WarningDetailPage() {
                         </div>
                       );
                     })}
-                    <div className="mt-3 p-3 rounded-xl bg-ink-50/80 text-xs text-ink-600 leading-relaxed">
-                      <span className="font-semibold text-ink-700">测评结论：</span>
-                      {student.assessmentHistory[0]?.conclusion}
-                    </div>
+                    {student?.assessmentHistory?.[0] && (
+                      <div className="mt-3 p-3 rounded-xl bg-ink-50/80 text-xs text-ink-600 leading-relaxed">
+                        <span className="font-semibold text-ink-700">测评结论：</span>
+                        {student.assessmentHistory[0].conclusion}
+                      </div>
+                    )}
+                    {!student?.assessmentHistory?.length && (
+                      <div className="text-center py-8 text-ink-400">
+                        <FileText className="h-10 w-10 mx-auto mb-2 opacity-40" />
+                        <p>暂无测评数据</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -545,9 +626,9 @@ export default function WarningDetailPage() {
               <CardContent className="space-y-6">
                 <div className="relative px-2">
                   <div className="grid grid-cols-3 gap-2 relative z-10">
-                    {warning.approvals.map((apr, idx) => {
+                    {approvals.map((apr, idx) => {
                       const isCompleted = apr.status === 'approved' || apr.status === 'rejected';
-                      const isCurrent = currentStage === apr.stage;
+                      const isCurrent = currentStage === apr.stage && canApprove;
                       const isRejected = apr.status === 'rejected';
                       return (
                         <div key={apr.id} className="flex flex-col items-center text-center">
@@ -580,7 +661,7 @@ export default function WarningDetailPage() {
 
                   <div className="absolute top-6 left-[8%] right-[8%] h-0.5 z-0 flex items-center">
                     {[0, 1].map((segIdx) => {
-                      const segCompleted = warning.approvals[segIdx].status === 'approved';
+                      const segCompleted = approvals[segIdx]?.status === 'approved';
                       return (
                         <div key={segIdx} className="flex-1 mx-4 h-full">
                           <div className={cn(
@@ -678,6 +759,12 @@ export default function WarningDetailPage() {
                       </div>
                     );
                   })}
+                  {warning.interventions.length === 0 && (
+                    <div className="text-center py-8 text-ink-400">
+                      <FileText className="h-10 w-10 mx-auto mb-2 opacity-40" />
+                      <p>暂无干预记录</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -788,68 +875,39 @@ export default function WarningDetailPage() {
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Shield className="h-5 w-5 text-warning-low" />
                   历史预警
-                  <span className="ml-auto text-xs text-ink-400 font-normal">共 {student.warningCount} 条</span>
+                  <span className="ml-auto text-xs text-ink-400 font-normal">共 {student?.warningCount || 0} 条</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {historyWarnings.map((hw) => (
+                {(student?.warningHistory || []).slice(0, 3).map((hw) => (
                   <div
                     key={hw.id}
                     className="p-3 rounded-xl border border-ink-100 hover:border-ink-200 hover:bg-ink-50/50 transition-all duration-200 cursor-pointer"
+                    onClick={() => navigate(`/warning/${hw.id}`)}
                   >
                     <div className="flex items-center gap-2 mb-1.5">
                       <Badge variant="solid" size="sm" color={hw.level === 1 ? 'warning-low' : 'warning-high'}>
                         {hw.level === 1 ? '一级' : '二级'}
                       </Badge>
                       <span className="font-mono text-xs text-ink-400">{hw.id}</span>
-                      <span className="ml-auto text-xs text-ink-400">{hw.time}</span>
+                      <span className="ml-auto text-xs text-ink-400">{new Date(hw.createdAt).toLocaleDateString('zh-CN')}</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-ink-600">{hw.trigger}</span>
+                      <span className="text-sm text-ink-600">{hw.triggerType === 'emotion' ? '情绪异常' : hw.triggerType === 'assessment' ? '测评异常' : hw.triggerType === 'behavior' ? '行为异常' : '综合触发'}</span>
                       <span className={cn(
                         'text-xs font-medium px-2 py-0.5 rounded-md',
-                        hw.status === '已处置' ? 'bg-mint-50 text-mint-700' : 'bg-ink-100 text-ink-500'
+                        hw.status === 'resolved' || hw.status === 'approved' ? 'bg-mint-50 text-mint-700' : 'bg-ink-100 text-ink-500'
                       )}>
-                        {hw.status}
+                        {hw.statusText}
                       </span>
                     </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Users className="h-5 w-5 text-primary-500" />
-                  同风险学生推荐
-                </CardTitle>
-                <CardDescription>相似特征的其他学生</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {similarStudents.map((ss) => (
-                  <div
-                    key={ss.id}
-                    className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-ink-50 transition-all duration-200 cursor-pointer group"
-                  >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary-200 to-primary-400 shrink-0 group-hover:scale-110 transition-transform">
-                      <User className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-ink-800 truncate">{ss.name}</span>
-                        <Badge size="sm" color={ss.riskLevel === 'high' ? 'risk-high' : 'risk-medium'}>
-                          {ss.riskLevel === 'high' ? '高' : '中'}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-ink-400 truncate">{ss.college}</p>
-                    </div>
-                    <div className="flex items-center gap-1 text-right shrink-0">
-                      <Star className="h-3 w-3 text-warning-low fill-warning-low" />
-                      <span className="text-xs font-bold text-ink-700">{ss.similarity}%</span>
-                    </div>
+                {(!student?.warningHistory || student.warningHistory.length === 0) && (
+                  <div className="text-center py-4 text-ink-400 text-sm">
+                    暂无历史预警记录
                   </div>
-                ))}
+                )}
               </CardContent>
             </Card>
 
@@ -861,25 +919,47 @@ export default function WarningDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-3">
-                <button className="flex flex-col items-center gap-2 p-4 rounded-xl bg-primary-50/60 hover:bg-primary-50 border border-primary-100 hover:border-primary-200 transition-all duration-200 group">
+                <button
+                  onClick={handleSendNotification}
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl bg-primary-50/60 hover:bg-primary-50 border border-primary-100 hover:border-primary-200 transition-all duration-200 group"
+                >
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-500 text-white group-hover:scale-110 transition-transform shadow-md">
                     <BellRing className="h-5 w-5" />
                   </div>
                   <span className="text-xs font-semibold text-primary-700">发送通知给辅导员</span>
                 </button>
-                <button className="flex flex-col items-center gap-2 p-4 rounded-xl bg-mint-50/60 hover:bg-mint-50 border border-mint-100 hover:border-mint-200 transition-all duration-200 group">
+                <button
+                  onClick={handleContactStudent}
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl bg-mint-50/60 hover:bg-mint-50 border border-mint-100 hover:border-mint-200 transition-all duration-200 group"
+                >
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-mint-500 text-white group-hover:scale-110 transition-transform shadow-md">
                     <PhoneCall className="h-5 w-5" />
                   </div>
                   <span className="text-xs font-semibold text-mint-700">一键联系学生</span>
                 </button>
-                <button className="flex flex-col items-center gap-2 p-4 rounded-xl bg-warning-low/10 hover:bg-warning-low/15 border border-warning-low/20 hover:border-warning-low/30 transition-all duration-200 group">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-low text-white group-hover:scale-110 transition-transform shadow-md">
+                <button
+                  onClick={handleToggleFocus}
+                  className={cn(
+                    'flex flex-col items-center gap-2 p-4 rounded-xl border transition-all duration-200 group',
+                    isFocused
+                      ? 'bg-warning-low/20 border-warning-low/30 hover:bg-warning-low/25'
+                      : 'bg-warning-low/10 hover:bg-warning-low/15 border border-warning-low/20 hover:border-warning-low/30'
+                  )}
+                >
+                  <div className={cn(
+                    'flex h-10 w-10 items-center justify-center rounded-xl text-white group-hover:scale-110 transition-transform shadow-md',
+                    isFocused ? 'bg-warning-high' : 'bg-warning-low'
+                  )}>
                     <BookmarkPlus className="h-5 w-5" />
                   </div>
-                  <span className="text-xs font-semibold text-warning-low">添加到重点关注</span>
+                  <span className="text-xs font-semibold text-warning-low">
+                    {isFocused ? '取消重点关注' : '添加到重点关注'}
+                  </span>
                 </button>
-                <button className="flex flex-col items-center gap-2 p-4 rounded-xl bg-ink-50 hover:bg-ink-100 border border-ink-200 hover:border-ink-300 transition-all duration-200 group">
+                <button
+                  onClick={handleExportReport}
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl bg-ink-50 hover:bg-ink-100 border border-ink-200 hover:border-ink-300 transition-all duration-200 group"
+                >
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ink-700 text-white group-hover:scale-110 transition-transform shadow-md">
                     <FileDown className="h-5 w-5" />
                   </div>
@@ -890,6 +970,45 @@ export default function WarningDetailPage() {
           </div>
         </div>
       </div>
+
+      {showContactModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-scale-in">
+            <div className="p-6 border-b border-ink-100">
+              <h3 className="text-lg font-bold text-ink-800">联系学生</h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-4 p-4 bg-ink-50 rounded-xl">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary-100">
+                  <User className="h-6 w-6 text-primary-500" />
+                </div>
+                <div>
+                  <p className="font-semibold text-ink-800">{student?.name || warning.studentName}</p>
+                  <p className="text-sm text-ink-500">{student?.phone || '暂无联系方式'}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-mint-500 text-white font-medium hover:bg-mint-600 transition-colors">
+                  <PhoneCall className="h-4 w-4" />
+                  拨打电话
+                </button>
+                <button className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary-500 text-white font-medium hover:bg-primary-600 transition-colors">
+                  <MessageSquare className="h-4 w-4" />
+                  发送消息
+                </button>
+              </div>
+            </div>
+            <div className="p-4 border-t border-ink-100">
+              <button
+                onClick={() => setShowContactModal(false)}
+                className="w-full py-2.5 rounded-xl text-ink-600 hover:bg-ink-50 font-medium transition-colors"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }

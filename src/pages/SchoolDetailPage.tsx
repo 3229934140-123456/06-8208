@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout, type BreadcrumbItem } from '@/components/layout/MainLayout';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/Card';
@@ -6,8 +6,9 @@ import { StatCard } from '@/components/ui/StatCard';
 import { Badge } from '@/components/ui/Badge';
 import { Loading } from '@/components/ui/Loading';
 import { cn } from '@/lib/utils';
-import type { RiskLevel } from '@/types';
+import type { RiskLevel, StudentProfile, AssessmentDimension, WarningRecord } from '@/types';
 import ReactECharts from 'echarts-for-react';
+import { useDataStore } from '@/store/dataStore';
 import {
   ArrowLeft,
   GraduationCap,
@@ -37,160 +38,12 @@ import {
   Star,
 } from 'lucide-react';
 
-const schoolTypeMap: Record<string, string[]> = {
-  '985': ['清华大学', '北京大学', '复旦大学', '上海交通大学', '浙江大学'],
-  '211': ['南京大学', '武汉大学', '华中科技大学', '同济大学'],
-  '本科': ['首都师范大学', '北京林业大学', '华东政法大学', '上海大学'],
-};
-
-function getSchoolTags(schoolName: string): string[] {
-  const tags: string[] = [];
-  if (schoolTypeMap['985'].includes(schoolName)) tags.push('985');
-  if (schoolTypeMap['211'].includes(schoolName)) tags.push('211');
-  tags.push('本科');
-  return tags;
-}
-
-function generateSchoolData() {
-  const colleges = ['计算机学院', '经济管理学院', '文学院', '理学院', '工学院', '医学院', '法学院', '外国语学院'];
-  const days = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (13 - i));
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  });
-
-  const heatmapData: Array<[number, number, number]> = [];
-  colleges.forEach((_, ci) => {
-    days.forEach((_, di) => {
-      const base = ci % 3 === 0 ? 2 : ci % 3 === 1 ? 1 : 0;
-      const val = Math.max(0, Math.min(4, base + Math.floor(Math.random() * 3) - 1));
-      heatmapData.push([di, ci, val]);
-    });
-  });
-
-  const emotionTrendData = colleges.slice(0, 5).map((college) => ({
-    name: college,
-    data: days.map(() => 60 + Math.floor(Math.random() * 30)),
-  }));
-
-  const emotionDistribution = Array.from({ length: 10 }, (_, i) => ({
-    range: `${i * 10}-${(i + 1) * 10}`,
-    count: Math.floor(Math.random() * 300) + 50 + (i === 4 || i === 5 ? 200 : 0),
-  }));
-
-  const topAbnormalStudents = Array.from({ length: 10 }, (_, i) => ({
-    id: `STU${200000 + i}`,
-    name: `学生${i + 1}`,
-    college: colleges[i % colleges.length],
-    grade: ['大一', '大二', '大三', '大四', '研一'][i % 5],
-    fluctuation: -(8 + Math.floor(Math.random() * 15)),
-    currentScore: 35 + Math.floor(Math.random() * 20),
-  }));
-
-  const dimensionRadar = {
-    current: [28, 32, 45, 68, 72],
-    overall: [32, 30, 42, 65, 70],
-    indicators: ['抑郁水平', '焦虑水平', '压力感知', '睡眠质量', '社会适应'],
-  };
-
-  const dimensionStack = dimensionRadar.indicators.map((dim) => ({
-    dimension: dim,
-    正常: Math.floor(Math.random() * 800) + 500,
-    轻度: Math.floor(Math.random() * 300) + 100,
-    中度: Math.floor(Math.random() * 120) + 20,
-    重度: Math.floor(Math.random() * 40) + 5,
-  }));
-
-  const completionRates = [
-    { name: '2026年春季普查', completed: 3852, total: 4120, date: '2026-04' },
-    { name: 'SDS抑郁专项', completed: 2156, total: 2580, date: '2026-05' },
-    { name: 'SAS焦虑专项', completed: 1988, total: 2580, date: '2026-05' },
-    { name: '新生心理普查', completed: 986, total: 1050, date: '2026-03' },
-  ];
-
-  const crisisTimeline = Array.from({ length: 15 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (14 - i));
-    const types = ['warning', 'approve', 'intervene', 'resolve', 'followup'] as const;
-    const type = types[Math.floor(Math.random() * types.length)];
-    const titles: Record<string, string> = {
-      warning: '新增预警',
-      approve: '审批通过',
-      intervene: '干预介入',
-      resolve: '成功处置',
-      followup: '随访跟进',
-    };
-    return {
-      time: d.toISOString(),
-      type,
-      title: titles[type] + (i + 1),
-      desc: `处理了 ${Math.floor(Math.random() * 5) + 1} 个案例`,
-      count: Math.floor(Math.random() * 8) + 1,
-    };
-  });
-
-  const crisisCategories = [
-    { value: Math.floor(Math.random() * 50) + 30, name: '情绪异常' },
-    { value: Math.floor(Math.random() * 40) + 20, name: '学业压力' },
-    { value: Math.floor(Math.random() * 30) + 15, name: '人际冲突' },
-    { value: Math.floor(Math.random() * 25) + 10, name: '家庭问题' },
-    { value: Math.floor(Math.random() * 20) + 5, name: '自伤风险' },
-    { value: Math.floor(Math.random() * 15) + 5, name: '其他' },
-  ];
-
-  const disposalBoxData = [
-    { name: '情绪异常', data: [2, 4, 6, 10, 18] },
-    { name: '学业压力', data: [3, 5, 8, 12, 22] },
-    { name: '人际冲突', data: [1, 3, 5, 9, 16] },
-    { name: '家庭问题', data: [4, 6, 10, 15, 28] },
-    { name: '自伤风险', data: [8, 12, 18, 28, 48] },
-  ];
-
-  const grades = ['大一', '大二', '大三', '大四', '研一', '研二', '研三'];
-  const riskLevels: RiskLevel[] = ['safe', 'low', 'medium', 'high'];
-  const studentNames = ['王晓明', '李雨晴', '张浩然', '陈思琪', '刘子轩', '赵雅婷', '孙俊杰', '周佳怡'];
-  const studentList = Array.from({ length: 56 }, (_, i) => {
-    const college = colleges[i % colleges.length];
-    const grade = grades[i % grades.length];
-    const riskLevel = riskLevels[i % riskLevels.length];
-    const lastScore = riskLevel === 'high' ? 35 + (i % 15) : riskLevel === 'medium' ? 50 + (i % 12) : riskLevel === 'low' ? 65 + (i % 15) : 75 + (i % 20);
-    return {
-      id: `STU${300000 + i}`,
-      name: studentNames[i % studentNames.length],
-      studentNo: `202${i % 5}${String(10000 + i).padStart(6, '0')}`,
-      college,
-      major: ['软件工程', '金融学', '汉语言文学', '物理学', '机械工程', '临床医学'][i % 6],
-      grade,
-      className: `${grade.slice(0, 2)}${String((i % 10) + 1).padStart(2, '0')}班`,
-      riskLevel,
-      lastAssessment: lastScore,
-      lastAssessmentDate: `2026-0${(i % 5) + 1}-${String((i % 27) + 1).padStart(2, '0')}`,
-      counselor: `辅导员${(i % 8) + 1}`,
-    };
-  });
-
-  return {
-    heatmapData,
-    days,
-    colleges,
-    emotionTrendData,
-    emotionDistribution,
-    topAbnormalStudents,
-    dimensionRadar,
-    dimensionStack,
-    completionRates,
-    crisisTimeline,
-    crisisCategories,
-    disposalBoxData,
-    studentList,
-  };
-}
-
 export default function SchoolDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { getSchoolById, getStudents, getWarnings, initializeData } = useDataStore();
+
   const [activeTab, setActiveTab] = useState<'overview' | 'emotion' | 'assessment' | 'crisis' | 'students'>('overview');
-  const [loading] = useState(false);
   const [selectedColleges, setSelectedColleges] = useState<string[]>([]);
   const [studentCollege, setStudentCollege] = useState('');
   const [studentGrade, setStudentGrade] = useState('');
@@ -199,61 +52,371 @@ export default function SchoolDetailPage() {
   const [studentPage, setStudentPage] = useState(1);
   const pageSize = 10;
 
-  const schoolName = '清华大学';
-  const schoolTags = getSchoolTags(schoolName);
-  const data = useMemo(() => generateSchoolData(), [id]);
+  useEffect(() => {
+    initializeData();
+  }, [initializeData]);
+
+  const school = useMemo(() => {
+    if (!id) return undefined;
+    return getSchoolById(id);
+  }, [id, getSchoolById]);
+
+  const students = useMemo(() => {
+    if (!id) return [];
+    return getStudents({ schoolId: id });
+  }, [id, getStudents]);
+
+  const warnings = useMemo(() => {
+    if (!id) return [];
+    return getWarnings({ schoolId: id });
+  }, [id, getWarnings]);
+
+  const colleges = useMemo(() => {
+    const collegeSet = new Set(students.map((s) => s.college));
+    return Array.from(collegeSet);
+  }, [students]);
+
+  const schoolStats = useMemo(() => {
+    const totalStudents = students.length;
+    const totalWarnings = warnings.length;
+    const todayNew = warnings.filter((w) => {
+      const today = new Date().toDateString();
+      return new Date(w.createdAt).toDateString() === today;
+    }).length;
+    const resolvedCount = warnings.filter((w) => w.status === 'resolved' || w.status === 'approved').length;
+    const resolutionRate = totalWarnings > 0 ? (resolvedCount / totalWarnings) * 100 : 95;
+
+    let avgResponseHours = 4.5;
+    const warningsWithInterventions = warnings.filter((w) => w.interventions.length > 0);
+    if (warningsWithInterventions.length > 0) {
+      const totalHours = warningsWithInterventions.reduce((sum, w) => {
+        const firstIntervention = w.interventions[w.interventions.length - 1];
+        if (firstIntervention) {
+          const created = new Date(w.createdAt).getTime();
+          const intervened = new Date(firstIntervention.createdAt).getTime();
+          const hours = Math.max(0.1, (intervened - created) / (1000 * 60 * 60));
+          return sum + hours;
+        }
+        return sum + 4;
+      }, 0);
+      avgResponseHours = totalHours / warningsWithInterventions.length;
+    }
+
+    return {
+      totalStudents,
+      currentWarnings: totalWarnings,
+      todayNew,
+      resolutionRate,
+      avgResponseHours,
+    };
+  }, [students, warnings]);
 
   const breadcrumbs: BreadcrumbItem[] = [
     { label: '首页', href: '/dashboard' },
     { label: '学校概览', href: '/dashboard' },
-    { label: schoolName },
+    { label: school?.name || '学校详情' },
   ];
 
-  const schoolStats = {
-    totalStudents: 41256,
-    currentWarnings: 128,
-    todayNew: 7,
-    resolutionRate: 87.5,
-    avgResponseHours: 6.2,
-  };
+  const heatmapData = useMemo(() => {
+    const days = Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (13 - i));
+      return `${d.getMonth() + 1}/${d.getDate()}`;
+    });
+
+    const data: Array<[number, number, number]> = [];
+    colleges.forEach((college, ci) => {
+      const collegeStudents = students.filter((s) => s.college === college);
+      days.forEach((_, di) => {
+        const riskLevels = collegeStudents.map((s) => {
+          if (s.riskLevel === 'high') return 4;
+          if (s.riskLevel === 'medium') return 3;
+          if (s.riskLevel === 'low') return 2;
+          return 1;
+        });
+        const avgRisk = riskLevels.length > 0
+          ? Math.round(riskLevels.reduce((a, b) => a + b, 0) / riskLevels.length)
+          : 1;
+        const variance = Math.floor(Math.random() * 2) - 1;
+        const val = Math.max(0, Math.min(4, avgRisk + variance));
+        data.push([di, ci, val]);
+      });
+    });
+
+    return { data, days, colleges };
+  }, [students, colleges]);
+
+  const emotionTrendData = useMemo(() => {
+    const days = Array.from({ length: 14 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (13 - i));
+      return `${d.getMonth() + 1}/${d.getDate()}`;
+    });
+
+    const collegeData = colleges.slice(0, 5).map((college) => {
+      const collegeStudents = students.filter((s) => s.college === college);
+      const data = days.map((_, di) => {
+        const scores = collegeStudents.map((s) => {
+          if (s.emotionHistory && s.emotionHistory[di]) {
+            return s.emotionHistory[di].value;
+          }
+          return 60 + Math.random() * 30;
+        });
+        return Math.round(scores.reduce((a, b) => a + b, 0) / Math.max(1, scores.length));
+      });
+      return { name: college, data };
+    });
+
+    return { days, collegeData };
+  }, [students, colleges]);
+
+  const emotionDistribution = useMemo(() => {
+    const distribution = Array.from({ length: 10 }, (_, i) => ({
+      range: `${i * 10}-${(i + 1) * 10}`,
+      count: 0,
+    }));
+
+    students.forEach((s) => {
+      const score = s.currentEmotionIndex;
+      const idx = Math.min(9, Math.max(0, Math.floor(score / 10)));
+      distribution[idx].count++;
+    });
+
+    return distribution;
+  }, [students]);
+
+  const topAbnormalStudents = useMemo(() => {
+    const studentsWithHistory = students.filter((s) => s.emotionHistory && s.emotionHistory.length >= 7);
+    const abnormal = studentsWithHistory.map((s) => {
+      const history = s.emotionHistory;
+      const recent = history.slice(0, 7);
+      const earlier = history.slice(7, 14);
+      const recentAvg = recent.reduce((a, b) => a + b.value, 0) / Math.max(1, recent.length);
+      const earlierAvg = earlier.length > 0
+        ? earlier.reduce((a, b) => a + b.value, 0) / earlier.length
+        : recentAvg + 10;
+      const fluctuation = Math.round(recentAvg - earlierAvg);
+      return {
+        id: s.id,
+        name: s.name,
+        college: s.college,
+        grade: s.grade,
+        fluctuation,
+        currentScore: Math.round(recentAvg),
+      };
+    });
+
+    return abnormal
+      .sort((a, b) => a.fluctuation - b.fluctuation)
+      .slice(0, 10);
+  }, [students]);
+
+  const dimensionRadar = useMemo(() => {
+    const dims: AssessmentDimension[] = ['depression', 'anxiety', 'stress', 'sleep', 'social'];
+    const dimNames: Record<AssessmentDimension, string> = {
+      depression: '抑郁水平',
+      anxiety: '焦虑水平',
+      stress: '压力感知',
+      sleep: '睡眠质量',
+      social: '社会适应',
+    };
+
+    const currentScores = dims.map((dim) => {
+      const scores = students
+        .filter((s) => s.assessmentHistory.length > 0)
+        .map((s) => s.assessmentHistory[0].dimensions[dim]?.score || 50);
+      return scores.length > 0
+        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+        : 50;
+    });
+
+    const overallScores = currentScores.map((s) => Math.round(s + (Math.random() * 10 - 5)));
+
+    return {
+      current: currentScores,
+      overall: overallScores,
+      indicators: dims.map((d) => dimNames[d]),
+    };
+  }, [students]);
+
+  const dimensionStack = useMemo(() => {
+    const dims: AssessmentDimension[] = ['depression', 'anxiety', 'stress', 'sleep', 'social'];
+    const dimNames: Record<AssessmentDimension, string> = {
+      depression: '抑郁',
+      anxiety: '焦虑',
+      stress: '压力',
+      sleep: '睡眠',
+      social: '社交',
+    };
+
+    return dims.map((dim) => {
+      const studentsWithAssessment = students.filter((s) => s.assessmentHistory.length > 0);
+      let normal = 0, mild = 0, moderate = 0, severe = 0;
+      studentsWithAssessment.forEach((s) => {
+        const level = s.assessmentHistory[0].dimensions[dim]?.level || '正常';
+        if (level === '正常') normal++;
+        else if (level === '轻度') mild++;
+        else if (level === '中度') moderate++;
+        else severe++;
+      });
+      const total = studentsWithAssessment.length || 1;
+      return {
+        dimension: dimNames[dim],
+        正常: normal,
+        轻度: mild,
+        中度: moderate,
+        重度: severe,
+      };
+    });
+  }, [students]);
+
+  const completionRates = useMemo(() => {
+    const total = students.length;
+    const assessed = students.filter((s) => s.assessmentHistory.length > 0).length;
+    const rate = total > 0 ? Math.round((assessed / total) * 100) : 0;
+
+    return [
+      { name: '2026年春季普查', completed: assessed, total, date: '2026-04', rate },
+      { name: 'SDS抑郁专项', completed: Math.round(assessed * 0.7), total, date: '2026-05', rate: Math.round(rate * 0.7) },
+      { name: 'SAS焦虑专项', completed: Math.round(assessed * 0.65), total, date: '2026-05', rate: Math.round(rate * 0.65) },
+      { name: '新生心理普查', completed: Math.round(assessed * 0.9), total: Math.round(total * 0.9), date: '2026-03', rate: Math.round(rate * 1.05) },
+    ];
+  }, [students]);
+
+  const crisisTimeline = useMemo(() => {
+    const events: Array<{
+      time: string;
+      type: 'warning' | 'approve' | 'intervene' | 'resolve' | 'followup';
+      title: string;
+      desc: string;
+      count: number;
+    }> = [];
+
+    const sortedWarnings = [...warnings].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    sortedWarnings.slice(0, 15).forEach((w, i) => {
+      events.push({
+        time: w.createdAt,
+        type: 'warning',
+        title: `新增预警：${w.studentName}`,
+        desc: w.triggerReason,
+        count: 1,
+      });
+
+      if (w.interventions.length > 0) {
+        const intervention = w.interventions[w.interventions.length - 1];
+        events.push({
+          time: intervention.createdAt,
+          type: 'intervene',
+          title: `干预介入：${intervention.typeName}`,
+          desc: `${intervention.operatorName}进行了${intervention.typeName}`,
+          count: 1,
+        });
+      }
+
+      if (w.status === 'resolved' || w.status === 'approved') {
+        events.push({
+          time: w.updatedAt,
+          type: 'resolve',
+          title: '成功处置',
+          desc: `预警${w.id}已成功处置`,
+          count: 1,
+        });
+      }
+    });
+
+    return events.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 15);
+  }, [warnings]);
+
+  const crisisCategories = useMemo(() => {
+    const typeMap: Record<string, number> = {
+      '情绪异常': 0,
+      '学业压力': 0,
+      '人际冲突': 0,
+      '家庭问题': 0,
+      '自伤风险': 0,
+      '其他': 0,
+    };
+
+    warnings.forEach((w) => {
+      if (w.triggerType === 'emotion') {
+        typeMap['情绪异常']++;
+      } else if (w.triggerType === 'assessment') {
+        typeMap['学业压力']++;
+      } else if (w.triggerType === 'behavior') {
+        typeMap['人际冲突']++;
+      } else {
+        typeMap['其他']++;
+      }
+    });
+
+    return Object.entries(typeMap)
+      .filter(([, value]) => value > 0)
+      .map(([name, value]) => ({ name, value }));
+  }, [warnings]);
+
+  const disposalBoxData = useMemo(() => {
+    const categories = ['情绪异常', '学业压力', '人际冲突', '家庭问题', '自伤风险'];
+    return categories.map((cat) => {
+      const data = [
+        Math.floor(Math.random() * 2) + 1,
+        Math.floor(Math.random() * 3) + 2,
+        Math.floor(Math.random() * 4) + 4,
+        Math.floor(Math.random() * 6) + 8,
+        Math.floor(Math.random() * 10) + 12,
+      ];
+      return { name: cat, data };
+    });
+  }, [warnings]);
 
   const filteredStudents = useMemo(() => {
-    return data.studentList.filter((s) => {
+    return students.filter((s) => {
       if (studentCollege && s.college !== studentCollege) return false;
       if (studentGrade && s.grade !== studentGrade) return false;
       if (studentRisk && s.riskLevel !== studentRisk) return false;
       if (studentSearch) {
         const kw = studentSearch.toLowerCase();
-        if (!s.name.toLowerCase().includes(kw) && !s.studentNo.includes(kw) && !s.college.toLowerCase().includes(kw)) return false;
+        if (
+          !s.name.toLowerCase().includes(kw) &&
+          !s.studentNo.includes(kw) &&
+          !s.college.toLowerCase().includes(kw) &&
+          !s.major.toLowerCase().includes(kw)
+        ) return false;
       }
       return true;
     });
-  }, [data.studentList, studentCollege, studentGrade, studentRisk, studentSearch]);
+  }, [students, studentCollege, studentGrade, studentRisk, studentSearch]);
 
   const studentTotalPages = Math.ceil(filteredStudents.length / pageSize);
   const pageStudents = filteredStudents.slice((studentPage - 1) * pageSize, studentPage * pageSize);
 
+  const handleStudentClick = (studentId: string) => {
+    navigate(`/students/${studentId}`);
+  };
+
   const heatmapOption = useMemo(() => ({
     tooltip: {
       position: 'top',
-      formatter: (p: any) => `${data.colleges[p.value[1]]} · ${data.days[p.value[0]]}<br/>风险等级：${['无风险', '低风险', '中风险', '高风险', '极高'][p.value[2]]}`,
+      formatter: (p: any) => `${heatmapData.colleges[p.value[1]]} · ${heatmapData.days[p.value[0]]}<br/>风险等级：${['无风险', '低风险', '中风险', '高风险', '极高'][p.value[2]]}`,
     },
     grid: { left: 100, right: 30, top: 40, bottom: 40 },
-    xAxis: { type: 'category', data: data.days, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 }, splitArea: { show: false } },
-    yAxis: { type: 'category', data: data.colleges, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 11 }, splitArea: { show: false } },
+    xAxis: { type: 'category', data: heatmapData.days, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 }, splitArea: { show: false } },
+    yAxis: { type: 'category', data: heatmapData.colleges, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 11 }, splitArea: { show: false } },
     visualMap: { min: 0, max: 4, calculable: false, orient: 'horizontal', left: 'center', bottom: 0, itemWidth: 12, itemHeight: 120, textStyle: { fontSize: 10, color: '#64748B' }, inRange: { color: ['#E8FAF8', '#74C0FC', '#FFA94D', '#FF8787', '#E03131'] }, show: true },
-    series: [{ name: '风险等级', type: 'heatmap', data: data.heatmapData, label: { show: false }, emphasis: { itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0, 0, 0, 0.3)' } }, itemStyle: { borderWidth: 2, borderColor: '#fff' } }],
-  }), [data]);
+    series: [{ name: '风险等级', type: 'heatmap', data: heatmapData.data, label: { show: false }, emphasis: { itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0, 0, 0, 0.3)' } }, itemStyle: { borderWidth: 2, borderColor: '#fff' } }],
+  }), [heatmapData]);
 
   const emotionTrendOption = useMemo(() => {
     const colors = ['#0F4C81', '#2EC4B6', '#FFA94D', '#74C0FC', '#FF6B6B'];
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: data.emotionTrendData.map((e) => e.name), bottom: 0, textStyle: { fontSize: 11, color: '#64748B' } },
+      legend: { data: emotionTrendData.collegeData.map((e) => e.name), bottom: 0, textStyle: { fontSize: 11, color: '#64748B' } },
       grid: { left: 40, right: 20, top: 20, bottom: 50 },
-      xAxis: { type: 'category', data: data.days, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
+      xAxis: { type: 'category', data: emotionTrendData.days, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
       yAxis: { type: 'value', min: 50, max: 100, axisLine: { show: false }, splitLine: { lineStyle: { color: '#F1F5F9' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
-      series: data.emotionTrendData.map((e, i) => ({
+      series: emotionTrendData.collegeData.map((e, i) => ({
         name: e.name,
         type: 'line',
         data: e.data,
@@ -264,26 +427,26 @@ export default function SchoolDetailPage() {
         itemStyle: { color: colors[i % colors.length], borderWidth: 2, borderColor: '#fff' },
       })),
     };
-  }, [data]);
+  }, [emotionTrendData]);
 
   const emotionDistOption = useMemo(() => ({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 50, right: 20, top: 30, bottom: 40 },
-    xAxis: { type: 'category', data: data.emotionDistribution.map((e) => e.range), axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 }, name: '情绪指数区间', nameTextStyle: { fontSize: 11, color: '#64748B' }, nameGap: 20 },
+    xAxis: { type: 'category', data: emotionDistribution.map((e) => e.range), axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 }, name: '情绪指数区间', nameTextStyle: { fontSize: 11, color: '#64748B' }, nameGap: 20 },
     yAxis: { type: 'value', axisLine: { show: false }, splitLine: { lineStyle: { color: '#F1F5F9' } }, axisLabel: { color: '#64748B', fontSize: 10 }, name: '学生人数', nameTextStyle: { fontSize: 11, color: '#64748B' }, nameGap: 25 },
     series: [{
       type: 'bar',
-      data: data.emotionDistribution.map((e, i) => ({ value: e.count, itemStyle: { color: i < 3 ? '#FF6B6B' : i < 5 ? '#FFA94D' : i < 8 ? '#74C0FC' : '#2EC4B6', borderRadius: [6, 6, 0, 0] } })),
+      data: emotionDistribution.map((e, i) => ({ value: e.count, itemStyle: { color: i < 3 ? '#FF6B6B' : i < 5 ? '#FFA94D' : i < 8 ? '#74C0FC' : '#2EC4B6', borderRadius: [6, 6, 0, 0] } })),
       barWidth: '65%',
       label: { show: true, position: 'top', fontSize: 10, color: '#64748B' },
     }],
-  }), [data]);
+  }), [emotionDistribution]);
 
   const assessmentRadarOption = useMemo(() => ({
     tooltip: {},
     legend: { data: ['本校平均', '总体水平'], bottom: 0, textStyle: { fontSize: 11, color: '#64748B' } },
     radar: {
-      indicator: data.dimensionRadar.indicators.map((name) => ({ name, max: 100 })),
+      indicator: dimensionRadar.indicators.map((name) => ({ name, max: 100 })),
       center: ['50%', '48%'],
       radius: '62%',
       axisName: { color: '#475569', fontSize: 12 },
@@ -293,14 +456,14 @@ export default function SchoolDetailPage() {
     series: [{
       type: 'radar',
       data: [
-        { value: data.dimensionRadar.current, name: '本校平均', lineStyle: { color: '#0F4C81', width: 2.5 }, itemStyle: { color: '#0F4C81' }, areaStyle: { color: 'rgba(15, 76, 129, 0.2)' } },
-        { value: data.dimensionRadar.overall, name: '总体水平', lineStyle: { color: '#2EC4B6', width: 2, type: 'dashed' }, itemStyle: { color: '#2EC4B6' }, areaStyle: { color: 'rgba(46, 196, 182, 0.12)' } },
+        { value: dimensionRadar.current, name: '本校平均', lineStyle: { color: '#0F4C81', width: 2.5 }, itemStyle: { color: '#0F4C81' }, areaStyle: { color: 'rgba(15, 76, 129, 0.2)' } },
+        { value: dimensionRadar.overall, name: '总体水平', lineStyle: { color: '#2EC4B6', width: 2, type: 'dashed' }, itemStyle: { color: '#2EC4B6' }, areaStyle: { color: 'rgba(46, 196, 182, 0.12)' } },
       ],
     }],
-  }), [data]);
+  }), [dimensionRadar]);
 
   const assessmentStackOption = useMemo(() => {
-    const dims = data.dimensionStack.map((d) => d.dimension);
+    const dims = dimensionStack.map((d) => d.dimension);
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       legend: { data: ['正常', '轻度', '中度', '重度'], bottom: 0, textStyle: { fontSize: 11, color: '#64748B' } },
@@ -308,13 +471,13 @@ export default function SchoolDetailPage() {
       xAxis: { type: 'category', data: dims, axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
       yAxis: { type: 'value', axisLine: { show: false }, splitLine: { lineStyle: { color: '#F1F5F9' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
       series: [
-        { name: '正常', type: 'bar', stack: 'total', data: data.dimensionStack.map((d) => d.正常), itemStyle: { color: '#2EC4B6' }, barWidth: '55%' },
-        { name: '轻度', type: 'bar', stack: 'total', data: data.dimensionStack.map((d) => d.轻度), itemStyle: { color: '#74C0FC' } },
-        { name: '中度', type: 'bar', stack: 'total', data: data.dimensionStack.map((d) => d.中度), itemStyle: { color: '#FFA94D' } },
-        { name: '重度', type: 'bar', stack: 'total', data: data.dimensionStack.map((d) => d.重度), itemStyle: { color: '#FF6B6B', borderRadius: [6, 6, 0, 0] } },
+        { name: '正常', type: 'bar', stack: 'total', data: dimensionStack.map((d) => d.正常), itemStyle: { color: '#2EC4B6' }, barWidth: '55%' },
+        { name: '轻度', type: 'bar', stack: 'total', data: dimensionStack.map((d) => d.轻度), itemStyle: { color: '#74C0FC' } },
+        { name: '中度', type: 'bar', stack: 'total', data: dimensionStack.map((d) => d.中度), itemStyle: { color: '#FFA94D' } },
+        { name: '重度', type: 'bar', stack: 'total', data: dimensionStack.map((d) => d.重度), itemStyle: { color: '#FF6B6B', borderRadius: [6, 6, 0, 0] } },
       ],
     };
-  }, [data]);
+  }, [dimensionStack]);
 
   const crisisPieOption = useMemo(() => ({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -328,22 +491,22 @@ export default function SchoolDetailPage() {
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 3 },
       label: { show: false },
       emphasis: { label: { show: true, fontSize: 12, fontWeight: 'bold' }, itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.2)' } },
-      data: data.crisisCategories,
+      data: crisisCategories,
     }],
-  }), [data]);
+  }), [crisisCategories]);
 
   const disposalBoxOption = useMemo(() => ({
     tooltip: { trigger: 'item' },
     grid: { left: 50, right: 20, top: 30, bottom: 40 },
-    xAxis: { type: 'category', data: data.disposalBoxData.map((d) => d.name), axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
+    xAxis: { type: 'category', data: disposalBoxData.map((d) => d.name), axisLine: { lineStyle: { color: '#E2E8F0' } }, axisLabel: { color: '#64748B', fontSize: 10 } },
     yAxis: { type: 'value', name: '处置时长(小时)', axisLine: { show: false }, splitLine: { lineStyle: { color: '#F1F5F9' } }, axisLabel: { color: '#64748B', fontSize: 10 }, nameTextStyle: { fontSize: 11, color: '#64748B' }, nameGap: 25 },
     series: [{
       type: 'boxplot',
-      data: data.disposalBoxData.map((d) => d.data),
+      data: disposalBoxData.map((d) => d.data),
       itemStyle: { color: '#0F4C81', borderColor: '#0F4C81' },
       emphasis: { itemStyle: { color: '#2EC4B6', borderColor: '#2EC4B6' } },
     }],
-  }), [data]);
+  }), [disposalBoxData]);
 
   const tabs = [
     { key: 'overview', label: '概览', icon: Activity },
@@ -353,7 +516,31 @@ export default function SchoolDetailPage() {
     { key: 'students', label: '学生名单', icon: Users },
   ] as const;
 
-  if (loading) return <MainLayout breadcrumbs={breadcrumbs}><div className="p-16"><Loading /></div></MainLayout>;
+  if (!school) {
+    return (
+      <MainLayout breadcrumbs={breadcrumbs}>
+        <div className="p-16"><Loading /></div>
+      </MainLayout>
+    );
+  }
+
+  const getRiskBadgeColor = (level: RiskLevel): 'risk-safe' | 'risk-low' | 'risk-medium' | 'risk-high' => {
+    switch (level) {
+      case 'safe': return 'risk-safe';
+      case 'low': return 'risk-low';
+      case 'medium': return 'risk-medium';
+      case 'high': return 'risk-high';
+    }
+  };
+
+  const getRiskText = (level: RiskLevel): string => {
+    switch (level) {
+      case 'safe': return '安全';
+      case 'low': return '低风险';
+      case 'medium': return '中风险';
+      case 'high': return '高风险';
+    }
+  };
 
   return (
     <MainLayout breadcrumbs={breadcrumbs}>
@@ -379,21 +566,19 @@ export default function SchoolDetailPage() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-3">
-                    <h1 className="text-2xl font-bold text-ink-900">{schoolName}</h1>
+                    <h1 className="text-2xl font-bold text-ink-900">{school.name}</h1>
                     <div className="flex items-center gap-1.5 text-sm text-ink-500">
                       <MapPin className="h-4 w-4" />
-                      <span>北京</span>
+                      <span>{school.province}</span>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {schoolTags.map((tag) => (
-                      <Badge key={tag} variant="solid" color={tag === '985' ? 'warning-high' : tag === '211' ? 'warning-low' : 'primary'} size="md" withDot>
-                        {tag}
-                      </Badge>
-                    ))}
+                    <Badge variant="solid" color="primary" size="md" withDot>
+                      {school.type}
+                    </Badge>
                     <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-mint-50 text-mint-700 border border-mint-200/60">
                       <Award className="h-3 w-3 inline mr-1" />
-                      副部级高校
+                      普通高等院校
                     </span>
                   </div>
                 </div>
@@ -404,8 +589,8 @@ export default function SchoolDetailPage() {
                   { label: '在校生数', value: schoolStats.totalStudents.toLocaleString(), suffix: '人', icon: Users, color: 'text-primary-600 bg-primary-50' },
                   { label: '当前预警', value: schoolStats.currentWarnings, suffix: '条', icon: ShieldAlert, color: 'text-warning-high bg-warning-high/10' },
                   { label: '今日新增', value: `+${schoolStats.todayNew}`, suffix: '条', icon: Calendar, color: 'text-warning-low bg-warning-low/15' },
-                  { label: '处置率', value: schoolStats.resolutionRate, suffix: '%', icon: CheckCircle2, color: 'text-mint-600 bg-mint-50' },
-                  { label: '平均响应', value: schoolStats.avgResponseHours, suffix: 'h', icon: Clock, color: 'text-risk-low bg-risk-low/15' },
+                  { label: '处置率', value: schoolStats.resolutionRate.toFixed(1), suffix: '%', icon: CheckCircle2, color: 'text-mint-600 bg-mint-50' },
+                  { label: '平均响应', value: schoolStats.avgResponseHours.toFixed(1), suffix: 'h', icon: Clock, color: 'text-risk-low bg-risk-low/15' },
                 ].map((item, idx) => (
                   <div key={idx} className="p-3 rounded-xl bg-white/80 backdrop-blur-sm border border-ink-100 hover:shadow-sm transition-all duration-200">
                     <div className="flex items-center gap-2 mb-1.5">
@@ -448,10 +633,10 @@ export default function SchoolDetailPage() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-              <StatCard title="本月新增预警" value="42" suffix="条" color="danger" icon={<ShieldAlert className="h-6 w-6" />} trendValue="-15%" trendType="down" description="较上月" />
-              <StatCard title="本月已处置" value="37" suffix="条" color="mint" icon={<CheckCircle2 className="h-6 w-6" />} trendValue="+12%" trendType="up" description="较上月" />
-              <StatCard title="重点关注学生" value="156" suffix="人" color="warning" icon={<Star className="h-6 w-6" />} trendValue="+3" trendType="up" description="较上周" />
-              <StatCard title="平均处置时长" value="6.2" suffix="小时" color="primary" icon={<Clock className="h-6 w-6" />} trendValue="-0.8h" trendType="down" description="较上月" />
+              <StatCard title="本月新增预警" value={Math.floor(warnings.length * 0.3).toString()} suffix="条" color="danger" icon={<ShieldAlert className="h-6 w-6" />} trendValue="-15%" trendType="down" description="较上月" />
+              <StatCard title="本月已处置" value={Math.floor(warnings.length * 0.3 * 0.85).toString()} suffix="条" color="mint" icon={<CheckCircle2 className="h-6 w-6" />} trendValue="+12%" trendType="up" description="较上月" />
+              <StatCard title="重点关注学生" value={students.filter(s => s.riskLevel === 'high').length.toString()} suffix="人" color="warning" icon={<Star className="h-6 w-6" />} trendValue="+3" trendType="up" description="较上周" />
+              <StatCard title="平均处置时长" value={schoolStats.avgResponseHours.toFixed(1)} suffix="小时" color="primary" icon={<Clock className="h-6 w-6" />} trendValue="-0.8h" trendType="down" description="较上月" />
             </div>
 
             <Card>
@@ -476,10 +661,10 @@ export default function SchoolDetailPage() {
                 <CardTitle className="flex items-center justify-between">
                   <span className="flex items-center gap-2 text-base">
                     <Activity className="h-5 w-5 text-primary-500" />
-                    各学院近7天情绪趋势
+                    各学院近14天情绪趋势
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {data.emotionTrendData.map((e) => {
+                    {emotionTrendData.collegeData.map((e) => {
                       const selected = selectedColleges.length === 0 || selectedColleges.includes(e.name);
                       return (
                         <button
@@ -508,7 +693,7 @@ export default function SchoolDetailPage() {
                 <ReactECharts
                   option={{
                     ...emotionTrendOption,
-                    series: emotionTrendOption.series.filter((s: any) => selectedColleges.length === 0 || selectedColleges.includes(s.name)),
+                    series: (emotionTrendOption.series as any).filter((s: any) => selectedColleges.length === 0 || selectedColleges.includes(s.name)),
                     legend: { ...emotionTrendOption.legend, data: (emotionTrendOption.legend as any).data.filter((n: string) => selectedColleges.length === 0 || selectedColleges.includes(n)) },
                   }}
                   style={{ height: 320 }}
@@ -542,8 +727,12 @@ export default function SchoolDetailPage() {
                 </CardHeader>
                 <CardContent className="max-h-[320px] overflow-y-auto">
                   <div className="space-y-2">
-                    {data.topAbnormalStudents.map((stu, idx) => (
-                      <div key={stu.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-ink-50/80 transition-all duration-200 group">
+                    {topAbnormalStudents.map((stu, idx) => (
+                      <button
+                        key={stu.id}
+                        onClick={() => handleStudentClick(stu.id)}
+                        className="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-ink-50/80 transition-all duration-200 group text-left"
+                      >
                         <span className={cn(
                           'flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold shrink-0',
                           idx === 0 ? 'bg-warning-high text-white' : idx === 1 ? 'bg-warning-low text-white' : idx === 2 ? 'bg-risk-medium text-white' : 'bg-ink-200 text-ink-600'
@@ -552,7 +741,7 @@ export default function SchoolDetailPage() {
                         </span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-ink-800">{stu.name}</span>
+                            <span className="text-sm font-semibold text-ink-800 group-hover:text-primary-600 transition-colors">{stu.name}</span>
                             <span className="text-[10px] text-ink-400 font-mono">{stu.id}</span>
                           </div>
                           <p className="text-xs text-ink-500 truncate">{stu.college} · {stu.grade}</p>
@@ -564,10 +753,10 @@ export default function SchoolDetailPage() {
                           </p>
                           <p className="text-[10px] text-ink-400">当前 {stu.currentScore}</p>
                         </div>
-                        <button className="p-1.5 rounded-lg text-ink-400 group-hover:text-primary-500 group-hover:bg-primary-50 transition-all">
+                        <div className="p-1.5 rounded-lg text-ink-400 group-hover:text-primary-500 group-hover:bg-primary-50 transition-all">
                           <Eye className="h-4 w-4" />
-                        </button>
-                      </div>
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </CardContent>
@@ -616,7 +805,7 @@ export default function SchoolDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {data.completionRates.map((cr, idx) => {
+                  {completionRates.map((cr, idx) => {
                     const rate = Math.round((cr.completed / cr.total) * 100);
                     return (
                       <div key={idx} className="p-4 rounded-xl bg-ink-50/60 hover:bg-ink-50 transition-colors">
@@ -668,12 +857,12 @@ export default function SchoolDetailPage() {
                     <Zap className="h-5 w-5 text-warning-low" />
                     危机事件时间线
                   </CardTitle>
-                  <CardDescription>近15天危机处理流程全记录</CardDescription>
+                  <CardDescription>近期危机处理流程全记录</CardDescription>
                 </CardHeader>
                 <CardContent className="max-h-[520px] overflow-y-auto pr-2">
                   <div className="relative pl-6 space-y-5">
                     <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-primary-200 via-mint-200 to-ink-100" />
-                    {data.crisisTimeline.map((evt, idx) => {
+                    {crisisTimeline.map((evt, idx) => {
                       const iconMap: Record<string, any> = { warning: ShieldAlert, approve: CheckCircle2, intervene: HeartHandshake, resolve: CheckCircle2, followup: Clock };
                       const colorMap: Record<string, string> = { warning: 'bg-warning-high', approve: 'bg-primary-500', intervene: 'bg-warning-low', resolve: 'bg-mint-500', followup: 'bg-risk-low' };
                       const Icon = iconMap[evt.type] || AlertCircle;
@@ -755,7 +944,7 @@ export default function SchoolDetailPage() {
                       className="input-base pl-10 appearance-none pr-10 cursor-pointer"
                     >
                       <option value="">全部学院</option>
-                      {data.colleges.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {colleges.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400 pointer-events-none" />
                   </div>
@@ -806,68 +995,80 @@ export default function SchoolDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pageStudents.map((stu, idx) => (
-                      <tr key={stu.id} className="border-b border-ink-50 hover:bg-primary-50/30 transition-colors group" style={{ animationDelay: `${idx * 0.03}s` }}>
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary-200 to-primary-400 shrink-0">
-                              <User className="h-4 w-4 text-white" />
+                    {pageStudents.map((stu, idx) => {
+                      const lastAssessment = stu.assessmentHistory[0];
+                      const lastScore = lastAssessment?.overallScore ?? 75;
+                      const lastDate = lastAssessment?.assessmentDate ?? '2026-04-15';
+                      return (
+                        <tr
+                          key={stu.id}
+                          onClick={() => handleStudentClick(stu.id)}
+                          className="border-b border-ink-50 hover:bg-primary-50/30 transition-colors group cursor-pointer"
+                          style={{ animationDelay: `${idx * 0.03}s` }}
+                        >
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary-200 to-primary-400 shrink-0">
+                                <User className="h-4 w-4 text-white" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-ink-800">{stu.name}</p>
+                                <p className="text-xs font-mono text-ink-400">{stu.studentNo}</p>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-ink-800">{stu.name}</p>
-                              <p className="text-xs font-mono text-ink-400">{stu.studentNo}</p>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <p className="text-sm text-ink-700">{stu.college}</p>
+                            <p className="text-xs text-ink-400">{stu.major}</p>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <p className="text-sm text-ink-700">{stu.grade}</p>
+                            <p className="text-xs text-ink-400">{stu.className}</p>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <Badge
+                              size="sm"
+                              withDot
+                              color={getRiskBadgeColor(stu.riskLevel)}
+                            >
+                              {getRiskText(stu.riskLevel)}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                'font-bold text-sm',
+                                lastScore < 50 ? 'text-warning-high' : lastScore < 65 ? 'text-warning-low' : lastScore < 80 ? 'text-risk-low' : 'text-mint-600'
+                              )}>
+                                {lastScore}
+                              </span>
+                              <div className="w-16 h-1.5 rounded-full bg-ink-100 overflow-hidden">
+                                <div
+                                  className={cn(
+                                    'h-full rounded-full',
+                                    lastScore < 50 ? 'bg-warning-high' : lastScore < 65 ? 'bg-warning-low' : lastScore < 80 ? 'bg-risk-low' : 'bg-mint-500'
+                                  )}
+                                  style={{ width: `${lastScore}%` }}
+                                />
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <p className="text-sm text-ink-700">{stu.college}</p>
-                          <p className="text-xs text-ink-400">{stu.major}</p>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <p className="text-sm text-ink-700">{stu.grade}</p>
-                          <p className="text-xs text-ink-400">{stu.className}</p>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <Badge
-                            size="sm"
-                            withDot
-                            color={
-                              stu.riskLevel === 'safe' ? 'risk-safe' :
-                              stu.riskLevel === 'low' ? 'risk-low' :
-                              stu.riskLevel === 'medium' ? 'risk-medium' : 'risk-high'
-                            }
-                          >
-                            {stu.riskLevel === 'safe' ? '安全' : stu.riskLevel === 'low' ? '低风险' : stu.riskLevel === 'medium' ? '中风险' : '高风险'}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <span className={cn(
-                              'font-bold text-sm',
-                              stu.lastAssessment < 50 ? 'text-warning-high' : stu.lastAssessment < 65 ? 'text-warning-low' : stu.lastAssessment < 80 ? 'text-risk-low' : 'text-mint-600'
-                            )}>
-                              {stu.lastAssessment}
-                            </span>
-                            <div className="w-16 h-1.5 rounded-full bg-ink-100 overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full rounded-full',
-                                  stu.lastAssessment < 50 ? 'bg-warning-high' : stu.lastAssessment < 65 ? 'bg-warning-low' : stu.lastAssessment < 80 ? 'bg-risk-low' : 'bg-mint-500'
-                                )}
-                                style={{ width: `${stu.lastAssessment}%` }}
-                              />
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3.5 text-xs text-ink-500 whitespace-nowrap">{stu.lastAssessmentDate}</td>
-                        <td className="px-4 py-3.5 text-sm text-ink-600">{stu.counselor}</td>
-                        <td className="px-4 py-3.5">
-                          <button className="p-1.5 rounded-lg text-primary-500 hover:bg-primary-50 transition-colors opacity-0 group-hover:opacity-100">
-                            <Eye className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-4 py-3.5 text-xs text-ink-500 whitespace-nowrap">{lastDate}</td>
+                          <td className="px-4 py-3.5 text-sm text-ink-600">{stu.counselor}</td>
+                          <td className="px-4 py-3.5">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStudentClick(stu.id);
+                              }}
+                              className="p-1.5 rounded-lg text-primary-500 hover:bg-primary-50 transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {pageStudents.length === 0 && (
                       <tr>
                         <td colSpan={8} className="px-4 py-16 text-center text-ink-400">

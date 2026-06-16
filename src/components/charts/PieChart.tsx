@@ -23,6 +23,7 @@ export interface PieChartProps {
   title?: string;
   subtitle?: string;
   showLegend?: boolean;
+  onItemClick?: (item: PieDataItem) => void;
 }
 
 const DEFAULT_COLORS = ['#2EC4B6', '#74C0FC', '#FFA94D', '#FF6B6B', '#0F4C81', '#9775FA', '#F06595', '#51CF66'];
@@ -45,6 +46,7 @@ export default function PieChart({
   title,
   subtitle,
   showLegend = true,
+  onItemClick,
 }: PieChartProps) {
   const chartRef = useRef<ReactECharts>(null);
   const palette = colors && colors.length > 0 ? colors : DEFAULT_COLORS;
@@ -263,6 +265,19 @@ export default function PieChart({
         style={{ width: '100%', height: '100%' }}
         notMerge={true}
         lazyUpdate={true}
+        onEvents={
+          onItemClick
+            ? {
+                click: (params: any) => {
+                  const d = params.data;
+                  if (d && d.name) {
+                    const item = data.find((x) => x.name === d.name);
+                    if (item) onItemClick(item);
+                  }
+                },
+              }
+            : undefined
+        }
       />
     </div>
   );

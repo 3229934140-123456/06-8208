@@ -1,12 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout, type BreadcrumbItem } from '@/components/layout/MainLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { LineChart, PieChart, RadarChart, TimelineChart } from '@/components/charts';
 import type { PieDataItem, RadarIndicator, RadarSeries } from '@/components/charts';
 import type { TimelineEvent } from '@/components/charts/TimelineChart';
-import { useStudentDetail } from '@/hooks/useMockData';
-import type { StudentProfile, AssessmentRecord, AssessmentDimension, RiskLevel } from '@/types';
+import { useDataStore } from '@/store/dataStore';
+import type { StudentProfile, AssessmentRecord, AssessmentDimension, RiskLevel, InterventionRecord } from '@/types';
 import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -37,6 +38,12 @@ import {
   Repeat,
   Users,
   PieChart as PieChartIcon,
+  X,
+  Save,
+  Copy,
+  CheckCheck,
+  FileEdit,
+  AlertCircle,
 } from 'lucide-react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -114,97 +121,6 @@ function EmotionRing({ value, size = 120 }: { value: number; size?: number }) {
   );
 }
 
-function generateMockStudentDetail(): StudentProfile & {
-  guardianName: string;
-  guardianRelationship: string;
-  guardianPhone: string;
-  medicalHistory: string;
-  familyHistory: string;
-  allergyHistory: string;
-  address: string;
-  ethnicity: string;
-  tags: string[];
-  assessments: AssessmentRecord[];
-  warnings: {
-    id: string;
-    level: RiskLevel;
-    triggerReason: string;
-    time: string;
-    status: string;
-    duration: string;
-  }[];
-  interventions: TimelineEvent[];
-} {
-  const dimensionNames: AssessmentDimension[] = ['depression', 'anxiety', 'stress', 'sleep', 'social'];
-
-  const assessments: AssessmentRecord[] = Array.from({ length: 4 }, (_elem: unknown, i: number) => {
-    const overall = 55 + Math.floor(Math.random() * 35);
-    return {
-      id: `ASM${String(1000 + i).padStart(5, '0')}`,
-      studentId: 'STU0000001',
-      assessmentName: ['SDS自评量表', 'SAS焦虑量表', 'PHQ-9抑郁筛查', '季度心理测评'][i],
-      assessmentDate: new Date(Date.now() - i * 86400000 * (30 + i * 15)).toISOString().split('T')[0],
-      overallScore: overall,
-      dimensions: dimensionNames.reduce((acc, dim) => {
-        const score = Math.floor(Math.random() * 50) + 30;
-        const level = score < 40 ? '正常' : score < 55 ? '轻度' : score < 70 ? '中度' : '重度';
-        acc[dim] = { score, level };
-        return acc;
-      }, {} as Record<AssessmentDimension, { score: number; level: string }>) as any,
-      conclusion: [
-        '情绪状态良好，建议保持积极心态',
-        '轻度焦虑倾向，建议适当放松',
-        '存在一定学业压力，建议心理咨询',
-        '整体心理状态平稳',
-      ][i],
-      isRetest: i === 2,
-      improvedPercent: i > 0 ? Math.floor(Math.random() * 20) + 5 : undefined,
-    };
-  });
-
-  return {
-    id: 'STU2026000001',
-    name: '张伟明',
-    gender: '男',
-    age: 20,
-    studentNo: '2023100123',
-    schoolId: 'SCH0001',
-    schoolName: '清华大学',
-    college: '计算机学院',
-    major: '软件工程',
-    grade: '大三',
-    className: '软工2103班',
-    phone: '13812345678',
-    counselor: '王老师',
-    currentEmotionIndex: 62,
-    riskLevel: 'medium',
-    warningCount: 2,
-    assessmentHistory: assessments,
-    emotionHistory: [],
-    warningHistory: [],
-    guardianName: '张建国',
-    guardianRelationship: '父亲',
-    guardianPhone: '13698765432',
-    medicalHistory: '无重大疾病史',
-    familyHistory: '无家族精神病史',
-    allergyHistory: '青霉素过敏',
-    address: '北京市海淀区中关村大街1号',
-    ethnicity: '汉族',
-    tags: ['学业困难', '性格内向', '贫困生'],
-    assessments,
-    warnings: [
-      { id: 'WRN2026031001', level: 'high', triggerReason: '连续7天情绪低于阈值 + 夜间行为异常', time: '2026-03-10 14:23', status: '已处理', duration: '48小时' },
-      { id: 'WRN2026012201', level: 'medium', triggerReason: 'SDS测评中度抑郁', time: '2026-01-22 09:15', status: '已关闭', duration: '72小时' },
-    ],
-    interventions: [
-      { id: 1, time: '2026-05-26 14:00', type: 'followup', typeName: '随访跟进', title: '第三次随访', description: '学生情绪状态明显改善，睡眠质量有所提高，社交活动增加。建议继续保持，两周后再次随访。', operator: '李老师', details: { '咨询类型': '面谈', '持续时长': '50分钟', '下次随访': '2026-06-09' } },
-      { id: 2, time: '2026-05-19 10:00', type: 'intervention', typeName: '心理咨询', title: '个体心理咨询（第二次）', description: '继续探讨学业压力问题，引入认知行为疗法，帮助调整不合理信念。学生配合度较好。', operator: '王老师', details: { '咨询类型': '面谈', '持续时长': '60分钟' } },
-      { id: 3, time: '2026-05-12 15:30', type: 'intervention', typeName: '心理咨询', title: '个体心理咨询（第一次）', description: '首次咨询，建立咨访关系。学生主诉学业压力大，对未来感到迷茫。初步评估存在中度焦虑情绪。', operator: '王老师', details: { '咨询类型': '面谈', '持续时长': '55分钟' } },
-      { id: 4, time: '2026-03-12 09:00', type: 'warning', typeName: '预警处置', title: '高危预警响应', description: '接到系统预警后，辅导员第一时间联系学生本人及家长，经评估后转介至校心理咨询中心进行专业干预。', operator: '王老师', details: { '响应时间': '2小时', '处置方式': '转介咨询 + 家长沟通' } },
-    ],
-  };
-}
-
 const emotionDimensionLabels: Record<AssessmentDimension, string> = {
   depression: '抑郁',
   anxiety: '焦虑',
@@ -214,28 +130,57 @@ const emotionDimensionLabels: Record<AssessmentDimension, string> = {
 };
 
 export default function StudentDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { getStudentById, updateStudent, initializeData, isFocusStudent, toggleFocusStudent } = useDataStore();
+
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const [compareFirst, setCompareFirst] = useState(0);
   const [compareSecond, setCompareSecond] = useState(1);
   const [showCompare, setShowCompare] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showAssessmentLinkModal, setShowAssessmentLinkModal] = useState(false);
+  const [showAddInterventionModal, setShowAddInterventionModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<StudentProfile>>({});
+  const [interventionForm, setInterventionForm] = useState({
+    type: 'intervention' as 'intervention' | 'followup' | 'warning',
+    typeName: '心理咨询',
+    title: '',
+    description: '',
+    operator: '',
+  });
 
-  const { loading } = useStudentDetail('STU2026000001');
-  const student = useMemo(() => generateMockStudentDetail(), []);
+  useEffect(() => {
+    initializeData();
+  }, [initializeData]);
+
+  const student = useMemo(() => {
+    if (!id) return undefined;
+    return getStudentById(id);
+  }, [id, getStudentById]);
+
+  const isFocused = useMemo(() => {
+    if (!id) return false;
+    return isFocusStudent(id);
+  }, [id, isFocusStudent]);
 
   const emotionChartData = useMemo(() => {
-    const dates = Array.from({ length: 30 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (29 - i));
+    if (!student || !student.emotionHistory || student.emotionHistory.length === 0) {
+      const dates = Array.from({ length: 30 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (29 - i));
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+      });
+      return { dates, data: [] };
+    }
+    const dates = student.emotionHistory.map(e => {
+      const d = new Date(e.date);
       return `${d.getMonth() + 1}/${d.getDate()}`;
     });
-    let baseValue = student.currentEmotionIndex;
-    const data = Array.from({ length: 30 }, () => {
-      baseValue += (Math.random() - 0.5) * 10;
-      baseValue = Math.max(30, Math.min(95, baseValue));
-      return Math.round(baseValue);
-    });
+    const data = student.emotionHistory.map(e => e.value);
     return { dates, data };
-  }, [student.currentEmotionIndex]);
+  }, [student]);
 
   const sourcePieData: PieDataItem[] = [
     { name: '社交数据', value: 32 },
@@ -246,6 +191,9 @@ export default function StudentDetailPage() {
 
   const emotionStats = useMemo(() => {
     const values = emotionChartData.data;
+    if (values.length === 0) {
+      return { avg: 0, max: 0, min: 0, abnormal: 0 };
+    }
     const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
     const max = Math.max(...values);
     const min = Math.min(...values);
@@ -262,7 +210,12 @@ export default function StudentDetailPage() {
   ];
 
   const radarSeries: RadarSeries[] = useMemo(() => {
-    const first = student.assessments[compareFirst];
+    if (!student || !student.assessmentHistory || student.assessmentHistory.length === 0) {
+      return [];
+    }
+    const assessments = student.assessmentHistory;
+    const firstIdx = Math.min(compareFirst, assessments.length - 1);
+    const first = assessments[firstIdx];
     const series: RadarSeries[] = [
       {
         name: first.assessmentName,
@@ -271,8 +224,8 @@ export default function StudentDetailPage() {
         ),
       },
     ];
-    if (showCompare && compareSecond !== compareFirst) {
-      const second = student.assessments[compareSecond];
+    if (showCompare && compareSecond !== firstIdx && assessments[compareSecond]) {
+      const second = assessments[compareSecond];
       series.push({
         name: second.assessmentName,
         data: (['depression', 'anxiety', 'stress', 'sleep', 'social'] as AssessmentDimension[]).map(
@@ -281,12 +234,138 @@ export default function StudentDetailPage() {
       });
     }
     return series;
-  }, [student.assessments, compareFirst, compareSecond, showCompare]);
+  }, [student, compareFirst, compareSecond, showCompare]);
+
+  const interventionEvents: TimelineEvent[] = useMemo(() => {
+    if (!student || !student.warningHistory) return [];
+    
+    const events: TimelineEvent[] = [];
+    let eventId = 1;
+
+    student.warningHistory.forEach(w => {
+      events.push({
+        id: eventId++,
+        time: w.createdAt,
+        type: 'warning',
+        typeName: '预警处置',
+        title: `${w.triggerReason}预警`,
+        description: w.triggerReason,
+        operator: w.studentName,
+        details: {
+          '风险等级': getRiskText(w.riskLevel),
+          '预警类型': w.triggerType,
+          '当前状态': w.statusText,
+        },
+      });
+
+      w.interventions?.forEach(iv => {
+        events.push({
+          id: eventId++,
+          time: iv.createdAt,
+          type: 'intervention',
+          typeName: '心理咨询',
+          title: iv.description || '干预记录',
+          description: iv.description || '',
+          operator: iv.operatorName || '',
+          details: {
+            '干预类型': iv.typeName,
+            '持续时长': '未知',
+          },
+        });
+      });
+    });
+
+    events.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+    return events;
+  }, [student]);
+
+  const handleOpenEdit = () => {
+    if (!student) return;
+    setEditForm({
+      name: student.name,
+      gender: student.gender,
+      age: student.age,
+      phone: student.phone || '',
+      college: student.college,
+      major: student.major,
+      grade: student.grade,
+      className: student.className,
+      counselor: student.counselor,
+      medicalHistory: student.medicalHistory || '',
+      familyHistory: student.familyHistory || '',
+      tags: [...student.tags],
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (!id || !student) return;
+    updateStudent(id, editForm);
+    setShowEditModal(false);
+  };
+
+  const handleGenerateAssessmentLink = () => {
+    setShowAssessmentLinkModal(true);
+  };
+
+  const handleCopyLink = () => {
+    const link = `https://mental-health.example.com/assessment/${id}?t=${Date.now()}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleAddIntervention = () => {
+    if (!id || !interventionForm.title) {
+      alert('请填写处置记录标题');
+      return;
+    }
+    setShowAddInterventionModal(false);
+    setInterventionForm({
+      type: 'intervention',
+      typeName: '心理咨询',
+      title: '',
+      description: '',
+      operator: '',
+    });
+    alert('处置记录已添加（模拟）');
+  };
+
+  const handleWarningClick = (warningId: string) => {
+    navigate(`/warning/${warningId}`);
+  };
+
+  if (!student) {
+    return (
+      <MainLayout breadcrumbs={breadcrumbs}>
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-20 h-20 rounded-2xl bg-ink-100 flex items-center justify-center mb-4">
+            <User className="h-10 w-10 text-ink-300" />
+          </div>
+          <h3 className="text-xl font-bold text-ink-800 mb-2">学生不存在</h3>
+          <p className="text-sm text-ink-500 mb-6">未找到对应的学生档案</p>
+          <button
+            onClick={() => navigate('/students')}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            返回学生列表
+          </button>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  const assessmentLink = `https://mental-health.example.com/assessment/${id}?t=${Date.now()}`;
 
   return (
     <MainLayout breadcrumbs={breadcrumbs}>
       <div className="space-y-6 stagger-reveal">
-        <button className="inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-primary-600 transition-colors">
+        <button
+          onClick={() => navigate(-1)}
+          className="inline-flex items-center gap-1.5 text-sm text-ink-500 hover:text-primary-600 transition-colors"
+        >
           <ArrowLeft className="h-4 w-4" />
           返回学生列表
         </button>
@@ -315,6 +394,11 @@ export default function StudentDetailPage() {
                     <Badge color={getRiskBadgeColor(student.riskLevel)} size="lg" variant="solid" withDot>
                       {getRiskText(student.riskLevel)}
                     </Badge>
+                    {isFocused && (
+                      <Badge color="risk-high" size="lg" variant="soft" withDot>
+                        重点关注
+                      </Badge>
+                    )}
                     {student.tags.map(tag => (
                       <span
                         key={tag}
@@ -336,7 +420,7 @@ export default function StudentDetailPage() {
                     </div>
                     <div className="flex items-center gap-2 text-ink-600">
                       <Phone className="h-4 w-4 text-ink-400 shrink-0" />
-                      <span className="font-medium">{student.phone}</span>
+                      <span className="font-medium">{student.phone || '未填写'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-ink-600 col-span-2">
                       <BookOpen className="h-4 w-4 text-ink-400 shrink-0" />
@@ -367,9 +451,9 @@ export default function StudentDetailPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-ink-400" />
+                      <Star className="h-4 w-4 text-warning-low" />
                       <span className="text-sm text-ink-600">
-                        紧急联系人: {student.guardianName}（{student.guardianRelationship}）
+                        {isFocused ? '已加入重点关注' : '未加入重点关注'}
                       </span>
                     </div>
                   </div>
@@ -378,19 +462,36 @@ export default function StudentDetailPage() {
             </div>
 
             <div className="flex flex-wrap gap-2 pt-5 mt-5 border-t border-ink-100">
-              <button className="btn-secondary flex items-center gap-2">
+              <button
+                onClick={handleOpenEdit}
+                className="btn-secondary flex items-center gap-2"
+              >
                 <Edit3 className="h-4 w-4" />
                 编辑档案
               </button>
-              <button className="btn-secondary flex items-center gap-2">
-                <Bell className="h-4 w-4" />
-                发送通知
+              <button
+                onClick={() => toggleFocusStudent(student.id)}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200 border',
+                  isFocused
+                    ? 'bg-warning-high/10 text-warning-high border-warning-high/30 hover:bg-warning-high/20'
+                    : 'btn-secondary'
+                )}
+              >
+                <Star className={cn('h-4 w-4', isFocused && 'fill-current')} />
+                {isFocused ? '取消关注' : '设为重点关注'}
               </button>
-              <button className="btn-secondary flex items-center gap-2">
+              <button
+                onClick={handleGenerateAssessmentLink}
+                className="btn-secondary flex items-center gap-2"
+              >
                 <Link2 className="h-4 w-4" />
                 生成测评链接
               </button>
-              <button className="btn-primary flex items-center gap-2">
+              <button
+                onClick={() => setShowAddInterventionModal(true)}
+                className="btn-primary flex items-center gap-2"
+              >
                 <Plus className="h-4 w-4" />
                 添加处置记录
               </button>
@@ -436,14 +537,12 @@ export default function StudentDetailPage() {
                       { label: '学号', value: student.studentNo },
                       { label: '性别', value: student.gender },
                       { label: '年龄', value: student.age + ' 岁' },
-                      { label: '民族', value: student.ethnicity },
-                      { label: '联系电话', value: student.phone },
+                      { label: '联系电话', value: student.phone || '未填写' },
                       { label: '学校', value: student.schoolName },
                       { label: '学院', value: student.college },
                       { label: '专业', value: student.major },
                       { label: '年级班级', value: student.grade + ' ' + student.className },
                       { label: '辅导员', value: student.counselor },
-                      { label: '家庭住址', value: student.address },
                     ].map((item) => (
                       <div key={item.label} className="flex items-start gap-3 py-2 border-b border-ink-50 last:border-b-0">
                         <span className="text-sm text-ink-400 w-20 shrink-0">{item.label}</span>
@@ -464,9 +563,8 @@ export default function StudentDetailPage() {
                 <CardContent>
                   <div className="space-y-4">
                     {[
-                      { label: '既往病史', value: student.medicalHistory, icon: Heart },
-                      { label: '家族病史', value: student.familyHistory, icon: Users },
-                      { label: '过敏史', value: student.allergyHistory, icon: AlertTriangle },
+                      { label: '既往病史', value: student.medicalHistory || '无', icon: Heart },
+                      { label: '家族病史', value: student.familyHistory || '无', icon: Users },
                     ].map((item) => (
                       <div key={item.label} className="flex items-start gap-4 p-4 rounded-xl bg-ink-50/60 border border-ink-100">
                         <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shrink-0">
@@ -493,21 +591,18 @@ export default function StudentDetailPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-2">
-                    {[...student.tags, '成绩中等', '喜欢编程', '早起习惯', '社交较少', '学习认真'].map((tag, i) => (
-                      <span
-                        key={i}
-                        className={cn(
-                          'px-3 py-1.5 rounded-xl text-sm font-medium border transition-all hover:scale-105 cursor-default',
-                          i < 3
-                            ? 'bg-warning-low/10 text-warning-low border-warning-low/30'
-                            : i < 5
-                            ? 'bg-primary-50 text-primary-600 border-primary-100'
-                            : 'bg-mint-50 text-mint-700 border-mint-100'
-                        )}
-                      >
-                        {tag}
-                      </span>
-                    ))}
+                    {student.tags.length > 0 ? (
+                      student.tags.map((tag, i) => (
+                        <span
+                          key={i}
+                          className="px-3 py-1.5 rounded-xl text-sm font-medium border bg-primary-50 text-primary-600 border-primary-100"
+                        >
+                          {tag}
+                        </span>
+                      ))
+                    ) : (
+                      <p className="text-sm text-ink-400">暂无标签</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -515,24 +610,32 @@ export default function StudentDetailPage() {
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <UserCheck className="h-4 w-4 text-primary-500" />
-                    紧急联系人
+                    <ClipboardList className="h-4 w-4 text-primary-500" />
+                    测评概览
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="p-4 rounded-xl bg-gradient-to-br from-primary-50/60 to-white border border-primary-100">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center">
-                        <User className="h-6 w-6 text-primary-600" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-ink-800">{student.guardianName}</div>
-                        <div className="text-xs text-ink-500">{student.guardianRelationship}</div>
-                      </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-ink-50/60 border border-ink-100">
+                      <span className="text-sm text-ink-600">测评次数</span>
+                      <span className="text-lg font-bold text-primary-600">
+                        {student.assessmentHistory?.length || 0} 次
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-ink-600">
-                      <Phone className="h-4 w-4 text-ink-400" />
-                      <span className="font-medium">{student.guardianPhone}</span>
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-ink-50/60 border border-ink-100">
+                      <span className="text-sm text-ink-600">最近测评得分</span>
+                      <span className="text-lg font-bold text-ink-700">
+                        {student.assessmentHistory && student.assessmentHistory.length > 0
+                          ? student.assessmentHistory[0].overallScore
+                          : '-'
+                        } 分
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-ink-50/60 border border-ink-100">
+                      <span className="text-sm text-ink-600">预警次数</span>
+                      <span className="text-lg font-bold text-warning-high">
+                        {student.warningCount} 次
+                      </span>
                     </div>
                   </div>
                 </CardContent>
@@ -560,15 +663,20 @@ export default function StudentDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="pt-2">
-                  <LineChart
-                    xAxisData={emotionChartData.dates}
-                    series={[{ name: '情绪指数', data: emotionChartData.data }]}
-                    colors={['#0F4C81']}
-                    height={320}
-                    yAxisName="指数"
-                    smooth={true}
-                    loading={loading}
-                  />
+                  {emotionChartData.data.length > 0 ? (
+                    <LineChart
+                      xAxisData={emotionChartData.dates}
+                      series={[{ name: '情绪指数', data: emotionChartData.data }]}
+                      colors={['#0F4C81']}
+                      height={320}
+                      yAxisName="指数"
+                      smooth={true}
+                    />
+                  ) : (
+                    <div className="h-64 flex items-center justify-center text-ink-400">
+                      暂无情绪数据
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -680,122 +788,131 @@ export default function StudentDetailPage() {
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               <div className="xl:col-span-2 space-y-4">
-                {student.assessments.map((asm, idx) => (
-                  <Card
-                    key={asm.id}
-                    className={cn(
-                      'hover:shadow-card-hover transition-all duration-300 cursor-pointer',
-                      showCompare && compareFirst === idx && 'ring-2 ring-primary-300'
-                    )}
-                    onClick={() => showCompare && setCompareFirst(idx)}
-                  >
-                    <CardContent className="p-5">
-                      <div className="flex items-start justify-between gap-4 mb-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                            <h4 className="font-bold text-ink-800 text-lg">{asm.assessmentName}</h4>
-                            {asm.isRetest && (
-                              <Badge color="risk-medium" size="sm" variant="soft">
-                                复测
-                              </Badge>
-                            )}
-                            {asm.improvedPercent && (
-                              <Badge color="risk-safe" size="sm" variant="soft" withDot>
-                                改善 +{asm.improvedPercent}%
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-ink-500">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-3.5 w-3.5" />
-                              {asm.assessmentDate}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-xs text-ink-400 mb-1">总分</div>
-                          <div
-                            className={cn(
-                              'text-3xl font-bold',
-                              asm.overallScore < 40 ? 'text-mint-600'
-                                : asm.overallScore < 55 ? 'text-risk-low'
-                                : asm.overallScore < 70 ? 'text-warning-low'
-                                : 'text-warning-high'
-                            )}
-                          >
-                            {asm.overallScore}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        {(['depression', 'anxiety', 'stress', 'sleep', 'social'] as AssessmentDimension[]).map((dim) => {
-                          const d = asm.dimensions[dim];
-                          return (
-                            <div key={dim} className="flex items-center gap-3">
-                              <span className="w-12 text-xs text-ink-500 shrink-0">
-                                {emotionDimensionLabels[dim]}
-                              </span>
-                              <div className="flex-1 h-2 rounded-full bg-ink-100 overflow-hidden">
-                                <div
-                                  className={cn(
-                                    'h-full rounded-full transition-all duration-700',
-                                    d.level === '正常' ? 'bg-mint-400'
-                                      : d.level === '轻度' ? 'bg-risk-low'
-                                      : d.level === '中度' ? 'bg-warning-low'
-                                      : 'bg-warning-high'
-                                  )}
-                                  style={{ width: d.score + '%' }}
-                                />
-                              </div>
-                              <span className="w-16 text-right">
-                                <span className={cn(
-                                  'text-xs font-bold',
-                                  d.level === '正常' ? 'text-mint-600'
-                                    : d.level === '轻度' ? 'text-risk-low'
-                                    : d.level === '中度' ? 'text-warning-low'
-                                    : 'text-warning-high'
-                                )}>
-                                  {d.score}
-                                </span>
-                                <span className="text-[10px] text-ink-400 ml-1">{d.level}</span>
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div className="mt-4 pt-4 border-t border-ink-100">
-                        <div className="flex items-start gap-2">
-                          <Check className="h-4 w-4 text-mint-500 mt-0.5 shrink-0" />
-                          <p className="text-sm text-ink-600 leading-relaxed">{asm.conclusion}</p>
-                        </div>
-                      </div>
-                      {showCompare && (
-                        <div className="mt-4 flex items-center gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCompareSecond(idx);
-                            }}
-                            className={cn(
-                              'text-xs px-3 py-1.5 rounded-lg font-medium transition-all',
-                              compareSecond === idx
-                                ? 'bg-mint-100 text-mint-700 border border-mint-200'
-                                : 'bg-ink-50 text-ink-500 border border-ink-200 hover:bg-ink-100'
-                            )}
-                          >
-                            {compareSecond === idx && <Check className="h-3 w-3 inline mr-1" />}
-                            设为对比项 B
-                          </button>
-                        </div>
+                {student.assessmentHistory && student.assessmentHistory.length > 0 ? (
+                  student.assessmentHistory.map((asm, idx) => (
+                    <Card
+                      key={asm.id}
+                      className={cn(
+                        'hover:shadow-card-hover transition-all duration-300 cursor-pointer',
+                        showCompare && compareFirst === idx && 'ring-2 ring-primary-300'
                       )}
+                      onClick={() => showCompare && setCompareFirst(idx)}
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex items-start justify-between gap-4 mb-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                              <h4 className="font-bold text-ink-800 text-lg">{asm.assessmentName}</h4>
+                              {asm.isRetest && (
+                                <Badge color="risk-medium" size="sm" variant="soft">
+                                  复测
+                                </Badge>
+                              )}
+                              {asm.improvedPercent && (
+                                <Badge color="risk-safe" size="sm" variant="soft" withDot>
+                                  改善 +{asm.improvedPercent}%
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-ink-500">
+                              <div className="flex items-center gap-1">
+                                <Calendar className="h-3.5 w-3.5" />
+                                {asm.assessmentDate}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-xs text-ink-400 mb-1">总分</div>
+                            <div
+                              className={cn(
+                                'text-3xl font-bold',
+                                asm.overallScore < 40 ? 'text-mint-600'
+                                  : asm.overallScore < 55 ? 'text-risk-low'
+                                  : asm.overallScore < 70 ? 'text-warning-low'
+                                  : 'text-warning-high'
+                              )}
+                            >
+                              {asm.overallScore}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2.5">
+                          {(['depression', 'anxiety', 'stress', 'sleep', 'social'] as AssessmentDimension[]).map((dim) => {
+                            const d = asm.dimensions[dim];
+                            return (
+                              <div key={dim} className="flex items-center gap-3">
+                                <span className="w-12 text-xs text-ink-500 shrink-0">
+                                  {emotionDimensionLabels[dim]}
+                                </span>
+                                <div className="flex-1 h-2 rounded-full bg-ink-100 overflow-hidden">
+                                  <div
+                                    className={cn(
+                                      'h-full rounded-full transition-all duration-700',
+                                      d.level === '正常' ? 'bg-mint-400'
+                                        : d.level === '轻度' ? 'bg-risk-low'
+                                        : d.level === '中度' ? 'bg-warning-low'
+                                        : 'bg-warning-high'
+                                    )}
+                                    style={{ width: d.score + '%' }}
+                                  />
+                                </div>
+                                <span className="w-16 text-right">
+                                  <span className={cn(
+                                    'text-xs font-bold',
+                                    d.level === '正常' ? 'text-mint-600'
+                                      : d.level === '轻度' ? 'text-risk-low'
+                                      : d.level === '中度' ? 'text-warning-low'
+                                      : 'text-warning-high'
+                                  )}>
+                                    {d.score}
+                                  </span>
+                                  <span className="text-[10px] text-ink-400 ml-1">{d.level}</span>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-4 pt-4 border-t border-ink-100">
+                          <div className="flex items-start gap-2">
+                            <Check className="h-4 w-4 text-mint-500 mt-0.5 shrink-0" />
+                            <p className="text-sm text-ink-600 leading-relaxed">{asm.conclusion}</p>
+                          </div>
+                        </div>
+                        {showCompare && (
+                          <div className="mt-4 flex items-center gap-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCompareSecond(idx);
+                              }}
+                              className={cn(
+                                'text-xs px-3 py-1.5 rounded-lg font-medium transition-all',
+                                compareSecond === idx
+                                  ? 'bg-mint-100 text-mint-700 border border-mint-200'
+                                  : 'bg-ink-50 text-ink-500 border border-ink-200 hover:bg-ink-100'
+                              )}
+                            >
+                              {compareSecond === idx && <Check className="h-3 w-3 inline mr-1" />}
+                              设为对比项 B
+                            </button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))
+                ) : (
+                  <Card>
+                    <CardContent className="py-12 text-center text-ink-400">
+                      <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                      <p>暂无测评记录</p>
                     </CardContent>
                   </Card>
-                ))}
+                )}
               </div>
 
-              {showCompare && (
+              {showCompare && student.assessmentHistory && student.assessmentHistory.length > 0 && (
                 <Card className="h-fit xl:sticky xl:top-6">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
@@ -803,9 +920,9 @@ export default function StudentDetailPage() {
                       测评对比雷达图
                     </CardTitle>
                     <CardDescription>
-                      {student.assessments[compareFirst].assessmentName}
-                      {compareSecond !== compareFirst && (
-                        <> vs {student.assessments[compareSecond].assessmentName}</>
+                      {student.assessmentHistory[compareFirst]?.assessmentName || '-'}
+                      {compareSecond !== compareFirst && student.assessmentHistory[compareSecond] && (
+                        <> vs {student.assessmentHistory[compareSecond].assessmentName}</>
                       )}
                     </CardDescription>
                   </CardHeader>
@@ -836,52 +953,58 @@ export default function StudentDetailPage() {
                       <th className="px-6 py-4 text-left font-semibold text-ink-600 whitespace-nowrap">触发原因</th>
                       <th className="px-6 py-4 text-left font-semibold text-ink-600 whitespace-nowrap">触发时间</th>
                       <th className="px-6 py-4 text-left font-semibold text-ink-600 whitespace-nowrap">处置状态</th>
-                      <th className="px-6 py-4 text-left font-semibold text-ink-600 whitespace-nowrap">处置时长</th>
                       <th className="px-6 py-4 text-left font-semibold text-ink-600 whitespace-nowrap">操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {student.warnings.map((w) => (
-                      <tr
-                        key={w.id}
-                        className={cn(
-                          'border-b border-ink-50 transition-all duration-200 hover:bg-primary-50/40',
-                          w.level === 'high' && 'bg-warning-high/5'
-                        )}
-                      >
-                        <td className="px-6 py-4">
-                          <span className="font-mono text-xs text-primary-600 font-semibold">{w.id}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <Badge color={getRiskBadgeColor(w.level)} size="md" withDot variant="solid">
-                            {getRiskText(w.level)}
-                          </Badge>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="max-w-xs">
-                            <span className="text-ink-700">{w.triggerReason}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="text-ink-500 whitespace-nowrap">{w.time}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <Badge color={w.status === '已处理' ? 'risk-safe' : 'risk-medium'} size="md" withDot>
-                            {w.status}
-                          </Badge>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="font-medium text-ink-600">{w.duration}</span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <button className="inline-flex items-center gap-1.5 text-xs text-primary-600 font-medium hover:text-primary-700 transition-colors">
-                            <Eye className="h-4 w-4" />
-                            查看详情
-                            <ChevronRight className="h-3.5 w-3.5" />
-                          </button>
+                    {student.warningHistory && student.warningHistory.length > 0 ? (
+                      student.warningHistory.map((w) => (
+                        <tr
+                          key={w.id}
+                          className={cn(
+                            'border-b border-ink-50 transition-all duration-200 hover:bg-primary-50/40 cursor-pointer',
+                            w.riskLevel === 'high' && 'bg-warning-high/5'
+                          )}
+                          onClick={() => handleWarningClick(w.id)}
+                        >
+                          <td className="px-6 py-4">
+                            <span className="font-mono text-xs text-primary-600 font-semibold">{w.id}</span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Badge color={getRiskBadgeColor(w.riskLevel)} size="md" withDot variant="solid">
+                              {getRiskText(w.riskLevel)}
+                            </Badge>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="max-w-xs">
+                              <span className="text-ink-700">{w.triggerReason}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="text-ink-500 whitespace-nowrap">{w.createdAt}</span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Badge color={w.status === 'resolved' ? 'risk-safe' : w.status === 'pending' ? 'risk-medium' : 'risk-low'} size="md" withDot>
+                              {w.statusText}
+                            </Badge>
+                          </td>
+                          <td className="px-6 py-4">
+                            <button className="inline-flex items-center gap-1.5 text-xs text-primary-600 font-medium hover:text-primary-700 transition-colors">
+                              <Eye className="h-4 w-4" />
+                              查看详情
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-12 text-center text-ink-400">
+                          <ShieldAlert className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                          <p>暂无预警记录</p>
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -898,24 +1021,318 @@ export default function StudentDetailPage() {
                     <MessageSquare className="h-4 w-4 text-primary-500" />
                     处置/咨询记录
                   </CardTitle>
-                  <CardDescription>共 {student.interventions.length} 条记录</CardDescription>
+                  <CardDescription>共 {interventionEvents.length} 条记录</CardDescription>
                 </div>
-                <button className="btn-primary flex items-center gap-2 text-sm">
+                <button
+                  onClick={() => setShowAddInterventionModal(true)}
+                  className="btn-primary flex items-center gap-2 text-sm"
+                >
                   <Plus className="h-4 w-4" />
                   新增记录
                 </button>
               </div>
             </CardHeader>
             <CardContent>
-              <TimelineChart
-                events={student.interventions}
-                height={600}
-                loading={loading}
-              />
+              {interventionEvents.length > 0 ? (
+                <TimelineChart
+                  events={interventionEvents}
+                  height={600}
+                />
+              ) : (
+                <div className="py-16 text-center text-ink-400">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                  <p>暂无处置/咨询记录</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
       </div>
+
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-hidden animate-slide-in">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-ink-100">
+              <h3 className="text-lg font-bold text-ink-800 flex items-center gap-2">
+                <FileEdit className="h-5 w-5 text-primary-500" />
+                编辑学生档案
+              </h3>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="p-2 rounded-lg hover:bg-ink-100 text-ink-400 hover:text-ink-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 overflow-y-auto max-h-[calc(90vh-140px)]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">姓名</label>
+                  <input
+                    type="text"
+                    value={editForm.name || ''}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">性别</label>
+                  <select
+                    value={editForm.gender || '男'}
+                    onChange={(e) => setEditForm({ ...editForm, gender: e.target.value as any })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  >
+                    <option value="男">男</option>
+                    <option value="女">女</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">年龄</label>
+                  <input
+                    type="number"
+                    value={editForm.age || ''}
+                    onChange={(e) => setEditForm({ ...editForm, age: Number(e.target.value) })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">联系电话</label>
+                  <input
+                    type="text"
+                    value={editForm.phone || ''}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">学院</label>
+                  <input
+                    type="text"
+                    value={editForm.college || ''}
+                    onChange={(e) => setEditForm({ ...editForm, college: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">专业</label>
+                  <input
+                    type="text"
+                    value={editForm.major || ''}
+                    onChange={(e) => setEditForm({ ...editForm, major: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">年级</label>
+                  <input
+                    type="text"
+                    value={editForm.grade || ''}
+                    onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">班级</label>
+                  <input
+                    type="text"
+                    value={editForm.className || ''}
+                    onChange={(e) => setEditForm({ ...editForm, className: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">辅导员</label>
+                  <input
+                    type="text"
+                    value={editForm.counselor || ''}
+                    onChange={(e) => setEditForm({ ...editForm, counselor: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">标签</label>
+                  <input
+                    type="text"
+                    value={(editForm.tags || []).join('，')}
+                    onChange={(e) => setEditForm({ ...editForm, tags: e.target.value.split(/[，,]/).map(t => t.trim()).filter(Boolean) })}
+                    placeholder="多个标签用逗号分隔"
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">既往病史</label>
+                  <textarea
+                    value={editForm.medicalHistory || ''}
+                    onChange={(e) => setEditForm({ ...editForm, medicalHistory: e.target.value })}
+                    rows={2}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all resize-none"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-ink-700 mb-1.5">家族病史</label>
+                  <textarea
+                    value={editForm.familyHistory || ''}
+                    onChange={(e) => setEditForm({ ...editForm, familyHistory: e.target.value })}
+                    rows={2}
+                    className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all resize-none"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-100 bg-ink-50/50">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-white border border-ink-200 text-ink-600 font-medium hover:bg-ink-100 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="btn-primary flex items-center gap-2"
+              >
+                <Save className="h-4 w-4" />
+                保存修改
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAssessmentLinkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden animate-slide-in">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-ink-100">
+              <h3 className="text-lg font-bold text-ink-800 flex items-center gap-2">
+                <Link2 className="h-5 w-5 text-primary-500" />
+                生成测评链接
+              </h3>
+              <button
+                onClick={() => setShowAssessmentLinkModal(false)}
+                className="p-2 rounded-lg hover:bg-ink-100 text-ink-400 hover:text-ink-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-sm text-ink-600">
+                以下是专属测评链接，发送给学生后可直接进行心理测评：
+              </p>
+              <div className="p-4 rounded-xl bg-primary-50/60 border border-primary-100">
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-sm text-primary-700 font-mono break-all">
+                    {assessmentLink}
+                  </code>
+                  <button
+                    onClick={handleCopyLink}
+                    className={cn(
+                      'shrink-0 p-2 rounded-lg transition-all',
+                      copied
+                        ? 'bg-mint-100 text-mint-600'
+                        : 'bg-white text-primary-600 hover:bg-primary-100 border border-primary-200'
+                    )}
+                  >
+                    {copied ? <CheckCheck className="h-5 w-5" /> : <Copy className="h-5 w-5" />}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-ink-500">
+                <AlertCircle className="h-4 w-4" />
+                链接有效期为7天，仅限本人使用
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-100 bg-ink-50/50">
+              <button
+                onClick={() => setShowAssessmentLinkModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-white border border-ink-200 text-ink-600 font-medium hover:bg-ink-100 transition-colors"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddInterventionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden animate-slide-in">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-ink-100">
+              <h3 className="text-lg font-bold text-ink-800 flex items-center gap-2">
+                <Plus className="h-5 w-5 text-primary-500" />
+                添加处置记录
+              </h3>
+              <button
+                onClick={() => setShowAddInterventionModal(false)}
+                className="p-2 rounded-lg hover:bg-ink-100 text-ink-400 hover:text-ink-600 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">记录类型</label>
+                <select
+                  value={interventionForm.type}
+                  onChange={(e) => {
+                    const type = e.target.value as any;
+                    const typeName = type === 'intervention' ? '心理咨询' : type === 'followup' ? '随访跟进' : '预警处置';
+                    setInterventionForm({ ...interventionForm, type, typeName });
+                  }}
+                  className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                >
+                  <option value="intervention">心理咨询</option>
+                  <option value="followup">随访跟进</option>
+                  <option value="warning">预警处置</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">标题</label>
+                <input
+                  type="text"
+                  value={interventionForm.title}
+                  onChange={(e) => setInterventionForm({ ...interventionForm, title: e.target.value })}
+                  placeholder="请输入记录标题"
+                  className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">处置人员</label>
+                <input
+                  type="text"
+                  value={interventionForm.operator}
+                  onChange={(e) => setInterventionForm({ ...interventionForm, operator: e.target.value })}
+                  placeholder="请输入处置人员姓名"
+                  className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink-700 mb-1.5">详细描述</label>
+                <textarea
+                  value={interventionForm.description}
+                  onChange={(e) => setInterventionForm({ ...interventionForm, description: e.target.value })}
+                  rows={4}
+                  placeholder="请输入处置详细内容"
+                  className="w-full px-4 py-2.5 rounded-xl border border-ink-200 focus:border-primary-400 focus:ring-2 focus:ring-primary-100 outline-none transition-all resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-100 bg-ink-50/50">
+              <button
+                onClick={() => setShowAddInterventionModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-white border border-ink-200 text-ink-600 font-medium hover:bg-ink-100 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleAddIntervention}
+                className="btn-primary flex items-center gap-2"
+              >
+                <Save className="h-4 w-4" />
+                保存记录
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 }

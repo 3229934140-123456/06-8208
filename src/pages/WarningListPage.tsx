@@ -1,10 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MainLayout, type BreadcrumbItem } from '@/components/layout/MainLayout';
 import { Card, CardContent } from '@/components/ui/Card';
 import { StatCard } from '@/components/ui/StatCard';
 import { Badge } from '@/components/ui/Badge';
 import { Loading } from '@/components/ui/Loading';
-import { useWarnings } from '@/hooks/useMockData';
+import { useDataStore } from '@/store/dataStore';
+import { useAppStore } from '@/store/appStore';
+import { useAuthStore } from '@/store/authStore';
+import { useDataFilter } from '@/hooks/usePermission';
 import type { WarningRecord, WarningLevel, RiskLevel, TriggerType, WarningStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -50,17 +54,12 @@ const riskLevelOptions = [
   { value: 'high', label: '高风险' },
 ];
 
-const provinceOptions = [
-  { value: '', label: '全部省份' },
-  { value: '北京', label: '北京' },
-  { value: '上海', label: '上海' },
-  { value: '广东', label: '广东' },
-  { value: '江苏', label: '江苏' },
-  { value: '浙江', label: '浙江' },
-  { value: '山东', label: '山东' },
-  { value: '河南', label: '河南' },
-  { value: '四川', label: '四川' },
-  { value: '湖北', label: '湖北' },
+const timeRangeOptions = [
+  { value: '7d', label: '近7天' },
+  { value: '30d', label: '近30天' },
+  { value: '90d', label: '近90天' },
+  { value: 'semester', label: '本学期' },
+  { value: 'custom', label: '自定义' },
 ];
 
 const triggerTypeMap: Record<TriggerType, string> = {
@@ -76,6 +75,7 @@ const warningStatusMap: Record<WarningStatus, { label: string; color: string }> 
   approved: { label: '审批通过', color: 'mint' },
   resolved: { label: '已处置', color: 'primary' },
   rejected: { label: '已驳回', color: 'risk-medium' },
+  escalating: { label: '升级中', color: 'warning-high' },
 };
 
 function getRiskBadgeColor(level: RiskLevel): 'risk-safe' | 'risk-low' | 'risk-medium' | 'risk-high' {
@@ -87,108 +87,172 @@ function getRiskBadgeColor(level: RiskLevel): 'risk-safe' | 'risk-low' | 'risk-m
   }
 }
 
-function generateMockWarnings(): WarningRecord[] {
-  const studentNames = ['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十', '郑十一', '冯十二', '陈十三', '褚十四', '卫十五', '蒋十六', '沈十七'];
-  const schools = ['清华大学', '北京大学', '复旦大学', '上海交通大学', '浙江大学', '南京大学', '中国人民大学', '武汉大学'];
-  const colleges = ['计算机学院', '经济管理学院', '文学院', '理学院', '工学院', '医学院', '法学院', '外国语学院'];
-  const majors = ['计算机科学', '软件工程', '金融学', '经济学', '汉语言文学', '物理学', '机械工程', '临床医学'];
-  const grades = ['大一', '大二', '大三', '大四', '研一', '研二'];
-  const statuses: WarningStatus[] = ['pending', 'processing', 'approved', 'resolved', 'rejected'];
-  const riskLevels: RiskLevel[] = ['safe', 'low', 'medium', 'high'];
-  const triggerTypes: TriggerType[] = ['emotion', 'assessment', 'behavior', 'composite'];
-  const reasons = [
-    '连续多日情绪指数低于阈值',
-    'SDS测评结果显示中度抑郁',
-    '夜间行为异常，连续多日凌晨未归',
-    '情绪低落+旷课行为+测评异常综合触发',
-    '社交活跃度显著下降',
-    '消费行为异常波动',
-    '多次心理咨询记录提及负面情绪',
-  ];
-
-  return Array.from({ length: 68 }, (_, i) => {
-    const level: WarningLevel = (i % 4 < 2 ? 1 : 2) as WarningLevel;
-    const riskLevel = riskLevels[i % riskLevels.length];
-    const status = statuses[i % statuses.length];
-    const emotionIndex = riskLevel === 'high' ? 30 + (i % 15) : riskLevel === 'medium' ? 45 + (i % 15) : 60 + (i % 25);
-    const depressionScore = riskLevel === 'high' ? 65 + (i % 20) : riskLevel === 'medium' ? 45 + (i % 18) : 20 + (i % 22);
-    const createdAt = new Date(Date.now() - i * 3600000 * (3 + Math.random() * 12));
-
-    return {
-      id: `WRN${String(20260001 + i).padStart(8, '0')}`,
-      studentId: `STU${String(100001 + i).padStart(6, '0')}`,
-      studentName: studentNames[i % studentNames.length],
-      schoolId: `SCH${String(i % 8 + 1).padStart(4, '0')}`,
-      schoolName: schools[i % schools.length],
-      college: colleges[i % colleges.length],
-      major: majors[i % majors.length],
-      grade: grades[i % grades.length],
-      level,
-      riskLevel,
-      triggerType: triggerTypes[i % triggerTypes.length],
-      triggerReason: reasons[i % reasons.length],
-      emotionIndex,
-      depressionScore,
-      createdAt: createdAt.toISOString(),
-      updatedAt: createdAt.toISOString(),
-      status,
-      statusText: warningStatusMap[status].label,
-      approvalStage: status === 'approved' ? 3 as const : status === 'processing' ? (1 + (i % 2)) as 0 | 1 | 2 | 3 : 0 as const,
-      approvals: [],
-      interventions: [],
-    };
-  });
-}
-
 export default function WarningListPage() {
+  const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const addNotification = useAppStore((state) => state.addNotification);
+  const dataFilter = useDataFilter();
+
+  const initializeData = useDataStore((state) => state.initializeData);
+  const getWarnings = useDataStore((state) => state.getWarnings);
+  const getSchools = useDataStore((state) => state.getSchools);
+  const escalateWarning = useDataStore((state) => state.escalateWarning);
+  const warnings = useDataStore((state) => state.warnings);
+
   const [activeTab, setActiveTab] = useState('all');
   const [searchValue, setSearchValue] = useState('');
   const [riskLevel, setRiskLevel] = useState('');
   const [province, setProvince] = useState('');
   const [timeRange, setTimeRange] = useState('7d');
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
   const pageSize = 20;
 
-  const { data: apiWarnings, loading } = useWarnings();
-  const mockWarnings = useMemo(() => generateMockWarnings(), []);
+  useEffect(() => {
+    initializeData();
+    const timer = setTimeout(() => setLoading(false), 300);
+    return () => clearTimeout(timer);
+  }, [initializeData]);
 
-  const allWarnings = useMemo<WarningRecord[]>(() => {
-    if (apiWarnings && apiWarnings.length > 0) {
-      return mockWarnings;
-    }
-    return mockWarnings;
-  }, [apiWarnings, mockWarnings]);
-
-  const filteredWarnings = useMemo(() => {
-    return allWarnings.filter((w) => {
-      if (activeTab === 'level1' && w.level !== 1) return false;
-      if (activeTab === 'level2' && w.level !== 2) return false;
-      if (activeTab === 'pending' && w.status !== 'processing' && w.status !== 'pending') return false;
-      if (activeTab === 'resolved' && w.status !== 'resolved' && w.status !== 'approved') return false;
-      if (riskLevel && w.riskLevel !== riskLevel) return false;
-      if (searchValue) {
-        const kw = searchValue.toLowerCase();
-        if (
-          !w.studentName.toLowerCase().includes(kw) &&
-          !w.schoolName.toLowerCase().includes(kw) &&
-          !w.id.toLowerCase().includes(kw)
-        )
-          return false;
-      }
-      return true;
+  const provinceOptions = useMemo(() => {
+    const schools = getSchools({
+      province: dataFilter.province,
+      schoolId: dataFilter.schoolId,
     });
-  }, [allWarnings, activeTab, riskLevel, searchValue, province, timeRange]);
+    const provinceSet = new Set(schools.map((s) => s.province));
+    const provinces = Array.from(provinceSet).sort();
+    return [
+      { value: '', label: '全部省份' },
+      ...provinces.map((p) => ({ value: p, label: p })),
+    ];
+  }, [getSchools, warnings, dataFilter]);
+
+  const dateRange = useMemo((): [string, string] | undefined => {
+    if (timeRange === 'custom' || timeRange === '') return undefined;
+
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const start = new Date();
+
+    switch (timeRange) {
+      case '7d':
+        start.setDate(start.getDate() - 7);
+        break;
+      case '30d':
+        start.setDate(start.getDate() - 30);
+        break;
+      case '90d':
+        start.setDate(start.getDate() - 90);
+        break;
+      case 'semester': {
+        const now = new Date();
+        if (now.getMonth() >= 8) {
+          start.setFullYear(now.getFullYear(), 8, 1);
+        } else {
+          start.setFullYear(now.getFullYear(), 1, 1);
+        }
+        break;
+      }
+      default:
+        return undefined;
+    }
+
+    start.setHours(0, 0, 0, 0);
+    return [start.toISOString(), end.toISOString()];
+  }, [timeRange]);
+
+  const filteredWarnings = useMemo<WarningRecord[]>(() => {
+    let level: WarningLevel | undefined;
+    let status: WarningStatus | undefined;
+
+    if (activeTab === 'level1') {
+      level = 1;
+    } else if (activeTab === 'level2') {
+      level = 2;
+    } else if (activeTab === 'pending') {
+      status = 'processing';
+    } else if (activeTab === 'resolved') {
+      status = 'resolved';
+    }
+
+    return getWarnings({
+      level,
+      status,
+      riskLevel: riskLevel as RiskLevel || undefined,
+      province: province || dataFilter.province || undefined,
+      schoolId: dataFilter.schoolId || undefined,
+      college: dataFilter.college || undefined,
+      keyword: searchValue || undefined,
+      dateRange,
+    });
+  }, [getWarnings, activeTab, riskLevel, province, searchValue, dateRange, dataFilter]);
 
   const stats = useMemo(() => {
+    const data = filteredWarnings;
     return {
-      pendingLevel1: allWarnings.filter((w) => w.level === 1 && (w.status === 'pending' || w.status === 'processing')).length,
-      pendingLevel2: allWarnings.filter((w) => w.level === 2 && (w.status === 'pending' || w.status === 'processing')).length,
-      inApproval: allWarnings.filter((w) => w.status === 'processing').length,
+      pendingLevel1: data.filter((w) => w.level === 1 && (w.status === 'pending' || w.status === 'processing')).length,
+      pendingLevel2: data.filter((w) => w.level === 2 && (w.status === 'pending' || w.status === 'processing')).length,
+      inApproval: data.filter((w) => w.status === 'processing').length,
     };
-  }, [allWarnings]);
+  }, [filteredWarnings]);
 
   const totalPages = Math.ceil(filteredWarnings.length / pageSize);
   const pageData = filteredWarnings.slice((page - 1) * pageSize, page * pageSize);
+
+  const handleTabChange = (tabKey: string) => {
+    setActiveTab(tabKey);
+    setPage(1);
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchValue(value);
+    setPage(1);
+  };
+
+  const handleRiskLevelChange = (value: string) => {
+    setRiskLevel(value);
+    setPage(1);
+  };
+
+  const handleProvinceChange = (value: string) => {
+    setProvince(value);
+    setPage(1);
+  };
+
+  const handleTimeRangeChange = (value: string) => {
+    setTimeRange(value);
+    setPage(1);
+  };
+
+  const handleViewDetail = (id: string) => {
+    navigate(`/warning/${id}`);
+  };
+
+  const handleProcess = (id: string) => {
+    navigate(`/warning/${id}`);
+  };
+
+  const handleEscalate = (warning: WarningRecord) => {
+    if (warning.level !== 1) return;
+
+    const confirmed = window.confirm(`确定要将预警 ${warning.id} 升级为二级预警吗？`);
+    if (!confirmed) return;
+
+    const success = escalateWarning(warning.id);
+    if (success) {
+      addNotification({
+        type: 'success',
+        title: '升级成功',
+        message: `预警 ${warning.id} 已升级为二级预警`,
+      });
+    } else {
+      addNotification({
+        type: 'error',
+        title: '升级失败',
+        message: '预警升级操作失败，请重试',
+      });
+    }
+  };
 
   const handleExport = () => {
     const exportData = filteredWarnings.map((w) => ({
@@ -198,17 +262,24 @@ export default function WarningListPage() {
       学院: w.college,
       年级专业: `${w.grade}${w.major}`,
       预警等级: w.level === 1 ? '一级' : '二级',
-      风险等级: w.riskLevel,
+      风险等级: w.riskLevel === 'safe' ? '安全' : w.riskLevel === 'low' ? '低风险' : w.riskLevel === 'medium' ? '中风险' : '高风险',
       触发类型: triggerTypeMap[w.triggerType],
       情绪指数: w.emotionIndex,
       抑郁得分: w.depressionScore,
       生成时间: new Date(w.createdAt).toLocaleString('zh-CN'),
       状态: w.statusText,
     }));
+
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '预警列表');
     XLSX.writeFile(wb, `预警列表_${new Date().toISOString().split('T')[0]}.xlsx`);
+
+    addNotification({
+      type: 'success',
+      title: '导出成功',
+      message: `已导出 ${filteredWarnings.length} 条预警数据`,
+    });
   };
 
   return (
@@ -277,10 +348,7 @@ export default function WarningListPage() {
               {tabs.map((tab) => (
                 <button
                   key={tab.key}
-                  onClick={() => {
-                    setActiveTab(tab.key);
-                    setPage(1);
-                  }}
+                  onClick={() => handleTabChange(tab.key)}
                   className={cn(
                     'px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200',
                     activeTab === tab.key
@@ -299,10 +367,7 @@ export default function WarningListPage() {
                 <input
                   type="text"
                   value={searchValue}
-                  onChange={(e) => {
-                    setSearchValue(e.target.value);
-                    setPage(1);
-                  }}
+                  onChange={(e) => handleSearchChange(e.target.value)}
                   placeholder="搜索学生名、学校、预警编号..."
                   className="input-base pl-10"
                 />
@@ -312,10 +377,7 @@ export default function WarningListPage() {
                 <ShieldHalf className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
                 <select
                   value={riskLevel}
-                  onChange={(e) => {
-                    setRiskLevel(e.target.value);
-                    setPage(1);
-                  }}
+                  onChange={(e) => handleRiskLevelChange(e.target.value)}
                   className="input-base pl-10 appearance-none pr-10 cursor-pointer"
                 >
                   {riskLevelOptions.map((opt) => (
@@ -329,10 +391,7 @@ export default function WarningListPage() {
                 <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
                 <select
                   value={province}
-                  onChange={(e) => {
-                    setProvince(e.target.value);
-                    setPage(1);
-                  }}
+                  onChange={(e) => handleProvinceChange(e.target.value)}
                   className="input-base pl-10 appearance-none pr-10 cursor-pointer"
                 >
                   {provinceOptions.map((opt) => (
@@ -346,13 +405,12 @@ export default function WarningListPage() {
                 <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
                 <select
                   value={timeRange}
-                  onChange={(e) => setTimeRange(e.target.value)}
+                  onChange={(e) => handleTimeRangeChange(e.target.value)}
                   className="input-base pl-10 appearance-none pr-10 cursor-pointer"
                 >
-                  <option value="1d">今天</option>
-                  <option value="7d">近7天</option>
-                  <option value="30d">近30天</option>
-                  <option value="90d">近90天</option>
+                  {timeRangeOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
                 <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400 pointer-events-none" />
               </div>
@@ -462,13 +520,22 @@ export default function WarningListPage() {
                           </td>
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-1">
-                              <button className="p-1.5 rounded-lg text-primary-500 hover:bg-primary-50 transition-colors" title="查看详情">
+                              <button
+                                onClick={() => handleViewDetail(warning.id)}
+                                className="p-1.5 rounded-lg text-primary-500 hover:bg-primary-50 transition-colors"
+                                title="查看详情"
+                              >
                                 <Eye className="h-4 w-4" />
                               </button>
-                              <button className="p-1.5 rounded-lg text-mint-600 hover:bg-mint-50 transition-colors" title="处理">
+                              <button
+                                onClick={() => handleProcess(warning.id)}
+                                className="p-1.5 rounded-lg text-mint-600 hover:bg-mint-50 transition-colors"
+                                title="处理"
+                              >
                                 <Wrench className="h-4 w-4" />
                               </button>
                               <button
+                                onClick={() => handleEscalate(warning)}
                                 className={cn(
                                   'p-1.5 rounded-lg transition-colors',
                                   warning.level === 1

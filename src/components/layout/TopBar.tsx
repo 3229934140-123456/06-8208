@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
   Bell,
@@ -12,8 +13,13 @@ import {
   ChevronRight,
   Home,
   X,
+  User as UserIcon,
+  AlertTriangle,
+  GraduationCap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useDataStore } from '@/store/dataStore';
+import type { StudentProfile, WarningRecord } from '@/types';
 
 export type BreadcrumbItem = {
   label: string;
@@ -37,16 +43,76 @@ const notifications = [
   { id: 4, title: '批量导入完成(128条)', time: '2小时前', unread: false },
 ];
 
+interface SearchResult {
+  type: 'student' | 'warning' | 'school';
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: React.ElementType;
+  iconColor: string;
+}
+
 export function TopBar({ breadcrumbs = defaultBreadcrumbs }: TopBarProps) {
+  const navigate = useNavigate();
+  const { getStudents, getWarnings, getSchools } = useDataStore();
+
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchValue, setSearchValue] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(-1);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   const unreadCount = notifications.filter((n) => n.unread).length;
+
+  const searchResults = useMemo<SearchResult[]>(() => {
+    const keyword = searchValue.trim();
+    if (!keyword) return [];
+
+    const results: SearchResult[] = [];
+
+    const students = getStudents({ keyword }).slice(0, 5);
+    students.forEach((s) => {
+      results.push({
+        type: 'student',
+        id: s.id,
+        title: s.name,
+        subtitle: `${s.studentNo} · ${s.college}`,
+        icon: UserIcon,
+        iconColor: 'text-primary-500 bg-primary-50',
+      });
+    });
+
+    const warnings = getWarnings({ keyword }).slice(0, 5);
+    warnings.forEach((w) => {
+      results.push({
+        type: 'warning',
+        id: w.id,
+        title: w.studentName,
+        subtitle: `${w.id} · ${w.triggerReason}`,
+        icon: AlertTriangle,
+        iconColor: 'text-warning-high bg-warning-high/10',
+      });
+    });
+
+    const schools = getSchools().filter((s) => s.name.includes(keyword)).slice(0, 3);
+    schools.forEach((s) => {
+      results.push({
+        type: 'school',
+        id: s.id,
+        title: s.name,
+        subtitle: s.province,
+        icon: GraduationCap,
+        iconColor: 'text-mint-600 bg-mint-50',
+      });
+    });
+
+    return results.slice(0, 10);
+  }, [searchValue, getStudents, getWarnings, getSchools]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -56,10 +122,49 @@ export function TopBar({ breadcrumbs = defaultBreadcrumbs }: TopBarProps) {
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
       }
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowSearchResults(false);
+        setSelectedResultIndex(-1);
+      }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && searchResults.length > 0) {
+      e.preventDefault();
+      const idx = selectedResultIndex >= 0 ? selectedResultIndex : 0;
+      handleResultClick(searchResults[idx]);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedResultIndex((prev) =>
+        prev < searchResults.length - 1 ? prev + 1 : 0
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedResultIndex((prev) =>
+        prev > 0 ? prev - 1 : searchResults.length - 1
+      );
+    } else if (e.key === 'Escape') {
+      setShowSearchResults(false);
+      setSelectedResultIndex(-1);
+    }
+  };
+
+  const handleResultClick = (result: SearchResult) => {
+    setSearchValue('');
+    setShowSearchResults(false);
+    setSelectedResultIndex(-1);
+
+    if (result.type === 'student') {
+      navigate(`/students/${result.id}`);
+    } else if (result.type === 'warning') {
+      navigate(`/warning/${result.id}`);
+    } else if (result.type === 'school') {
+      navigate(`/dashboard/school/${result.id}`);
+    }
+  };
 
   const toggleTheme = () => {
     const next = theme === 'light' ? 'dark' : 'light';
@@ -99,40 +204,114 @@ export function TopBar({ breadcrumbs = defaultBreadcrumbs }: TopBarProps) {
         </div>
 
         <div className="flex-1 flex justify-center px-2 lg:px-8">
-          <div
-            className={cn(
-              'w-full max-w-xl flex items-center gap-2.5 rounded-xl px-3.5 py-2 border transition-all duration-200',
-              searchFocused
-                ? 'bg-white border-primary-300 ring-4 ring-primary-500/10 shadow-sm'
-                : 'bg-ink-50 border-transparent hover:border-ink-200 hover:bg-white'
-            )}
-          >
-            <Search
+          <div className="relative w-full max-w-xl" ref={searchRef}>
+            <div
               className={cn(
-                'h-4 w-4 shrink-0 transition-colors',
-                searchFocused ? 'text-primary-500' : 'text-ink-400'
+                'flex items-center gap-2.5 rounded-xl px-3.5 py-2 border transition-all duration-200',
+                searchFocused
+                  ? 'bg-white border-primary-300 ring-4 ring-primary-500/10 shadow-sm'
+                  : 'bg-ink-50 border-transparent hover:border-ink-200 hover:bg-white'
               )}
-            />
-            <input
-              type="text"
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
-              placeholder="搜索学生、学校、预警编号..."
-              className="flex-1 bg-transparent text-sm text-ink-800 placeholder:text-ink-400 outline-none min-w-0"
-            />
-            {searchValue && (
-              <button
-                onClick={() => setSearchValue('')}
-                className="shrink-0 rounded-md p-1 text-ink-400 hover:bg-ink-100 hover:text-ink-600 transition-colors"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+            >
+              <Search
+                className={cn(
+                  'h-4 w-4 shrink-0 transition-colors',
+                  searchFocused ? 'text-primary-500' : 'text-ink-400'
+                )}
+              />
+              <input
+                type="text"
+                value={searchValue}
+                onChange={(e) => {
+                  setSearchValue(e.target.value);
+                  setSelectedResultIndex(-1);
+                }}
+                onFocus={() => {
+                  setSearchFocused(true);
+                  if (searchValue.trim()) setShowSearchResults(true);
+                }}
+                onBlur={() => {
+                  setSearchFocused(false);
+                }}
+                onKeyDown={handleSearchKeyDown}
+                onInput={(e) => {
+                  const val = (e.target as HTMLInputElement).value;
+                  if (val.trim()) setShowSearchResults(true);
+                }}
+                placeholder="搜索学生、学校、预警编号..."
+                className="flex-1 bg-transparent text-sm text-ink-800 placeholder:text-ink-400 outline-none min-w-0"
+              />
+              {searchValue && (
+                <button
+                  onClick={() => {
+                    setSearchValue('');
+                    setShowSearchResults(false);
+                  }}
+                  className="shrink-0 rounded-md p-1 text-ink-400 hover:bg-ink-100 hover:text-ink-600 transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <kbd className="hidden md:inline-flex shrink-0 items-center gap-0.5 rounded-md border border-ink-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-ink-500">
+                Ctrl K
+              </kbd>
+            </div>
+
+            {showSearchResults && searchResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 rounded-2xl bg-white border border-ink-200 shadow-card-hover animate-fade-in-up overflow-hidden z-50">
+                <div className="px-4 py-2.5 border-b border-ink-100 bg-ink-50/50">
+                  <p className="text-xs font-medium text-ink-500">
+                    搜索结果 ({searchResults.length})
+                  </p>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {searchResults.map((result, index) => {
+                    const Icon = result.icon;
+                    return (
+                      <button
+                        key={`${result.type}-${result.id}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleResultClick(result);
+                        }}
+                        onMouseEnter={() => setSelectedResultIndex(index)}
+                        className={cn(
+                          'w-full flex items-center gap-3 px-4 py-3 text-left transition-colors border-b border-ink-50 last:border-b-0',
+                          selectedResultIndex === index
+                            ? 'bg-primary-50'
+                            : 'hover:bg-ink-50'
+                        )}
+                      >
+                        <div className={cn('flex h-9 w-9 items-center justify-center rounded-xl shrink-0', result.iconColor)}>
+                          <Icon className="h-4.5 w-4.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-ink-800 truncate">
+                            {result.title}
+                          </p>
+                          <p className="text-xs text-ink-400 truncate">
+                            {result.subtitle}
+                          </p>
+                        </div>
+                        <span className="text-[10px] px-2 py-1 rounded-md bg-ink-100 text-ink-500 font-medium shrink-0">
+                          {result.type === 'student' ? '学生' : result.type === 'warning' ? '预警' : '学校'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
-            <kbd className="hidden md:inline-flex shrink-0 items-center gap-0.5 rounded-md border border-ink-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-ink-500">
-              Ctrl K
-            </kbd>
+
+            {showSearchResults && searchValue.trim() && searchResults.length === 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 rounded-2xl bg-white border border-ink-200 shadow-card-hover animate-fade-in-up overflow-hidden z-50">
+                <div className="px-4 py-8 text-center">
+                  <Search className="h-8 w-8 text-ink-300 mx-auto mb-2" />
+                  <p className="text-sm text-ink-500">未找到相关结果</p>
+                  <p className="text-xs text-ink-400 mt-1">试试其他关键词吧</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

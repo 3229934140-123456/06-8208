@@ -1,11 +1,23 @@
 export type UserRole = 'ministry' | 'province' | 'school' | 'center' | 'liaison' | 'counselor';
 
+export type ScopeType = 'national' | 'province' | 'school' | 'college';
+
+export interface UserScope {
+  type: ScopeType;
+  province?: string;
+  schoolId?: string;
+  schoolName?: string;
+  college?: string;
+}
+
 export interface User {
   id: string;
   name: string;
   role: UserRole;
   province?: string;
   schoolId?: string;
+  scope: UserScope;
+  permissions: string[];
 }
 
 export type SchoolType = '本科' | '专科' | '高职';
@@ -46,7 +58,7 @@ export type WarningLevel = 1 | 2;
 
 export type TriggerType = 'emotion' | 'assessment' | 'behavior' | 'composite';
 
-export type WarningStatus = 'pending' | 'processing' | 'approved' | 'resolved' | 'rejected';
+export type WarningStatus = 'pending' | 'processing' | 'approved' | 'resolved' | 'rejected' | 'escalating';
 
 export interface WarningRecord {
   id: string;

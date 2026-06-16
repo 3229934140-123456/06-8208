@@ -23,6 +23,9 @@ import { Loading } from '@/components/ui/Loading';
 import { PieChart, BarChart, LineChart, ChinaHeatMap } from '@/components/charts';
 import type { PieDataItem, BarDataItem, LineSeries, ProvinceRiskData } from '@/components/charts';
 import { useAppStore } from '@/store/appStore';
+import { useDataStore } from '@/store/dataStore';
+import { useDataFilter, useScope } from '@/hooks/usePermission';
+import { formatNumber } from '@/utils/formatter';
 
 const provinces = [
   '全国', '北京', '上海', '广东', '江苏', '浙江', '山东', '河南', '四川', '湖北',
@@ -204,24 +207,179 @@ function MiniSparkline({ data, color = '#FF6B6B' }: { data: number[]; color?: st
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { selectedProvince, selectedSchoolType, selectedTimeRange, setSelectedProvince, setSelectedSchoolType, setSelectedTimeRange } = useAppStore();
+  const scope = useScope();
+  const { selectedProvince, selectedSchoolType, selectedTimeRange, setSelectedProvince, setSelectedSchoolType, setSelectedTimeRange, setWarningFilter } = useAppStore();
+  const dataFilter = useDataFilter();
+  const initializeData = useDataStore((state) => state.initializeData);
+  const getKPIData = useDataStore((state) => state.getKPIData);
+  const getProvinceData = useDataStore((state) => state.getProvinceData);
+  const getSchools = useDataStore((state) => state.getSchools);
+  const getStudents = useDataStore((state) => state.getStudents);
+  const getWarnings = useDataStore((state) => state.getWarnings);
+  const getSchoolById = useDataStore((state) => state.getSchoolById);
 
   const [provinceDropdownOpen, setProvinceDropdownOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  const provinceData = useMemo(() => generateProvinceData(), []);
-  const riskPieData = useMemo(() => generateRiskPieData(), []);
-  const rankData = useMemo(() => generateRankData(), []);
-  const trendData = useMemo(() => generateTrendData(), []);
-  const warningStream = useMemo(() => generateWarningStream(), []);
-  const highRiskSchools = useMemo(() => generateHighRiskSchools(), []);
+  const effectiveProvince = selectedProvince || dataFilter.province;
+
+  const kpiData = useMemo(() => {
+    return getKPIData({
+      province: effectiveProvince || undefined,
+      schoolId: dataFilter.schoolId,
+    });
+  }, [getKPIData, effectiveProvince, dataFilter.schoolId]);
+
+  const provinceData = useMemo((): ProvinceRiskData[] => {
+    const data = getProvinceData({ province: effectiveProvince || undefined });
+    return data.map((d) => ({
+      name: d.name,
+      value: d.value,
+      studentCount: d.studentCount,
+      warningCount: d.warningCount,
+      highRiskCount: d.highRiskCount,
+    }));
+  }, [getProvinceData, effectiveProvince]);
+
+  const students = useMemo(() => {
+    return getStudents({
+      province: effectiveProvince || undefined,
+      schoolId: dataFilter.schoolId,
+      college: dataFilter.college,
+    });
+  }, [getStudents, effectiveProvince, dataFilter.schoolId, dataFilter.college]);
+
+  const warnings = useMemo(() => {
+    return getWarnings({
+      province: effectiveProvince || undefined,
+      schoolId: dataFilter.schoolId,
+      college: dataFilter.college,
+    });
+  }, [getWarnings, effectiveProvince, dataFilter.schoolId, dataFilter.college]);
+
+  const schools = useMemo(() => {
+    return getSchools({
+      province: effectiveProvince || undefined,
+      schoolId: dataFilter.schoolId,
+    });
+  }, [getSchools, effectiveProvince, dataFilter.schoolId]);
+
+  const riskPieData = useMemo((): PieDataItem[] => {
+    const total = students.length || 1;
+    const safeCount = students.filter((s) => s.riskLevel === 'safe').length;
+    const lowCount = students.filter((s) => s.riskLevel === 'low').length;
+    const mediumCount = students.filter((s) => s.riskLevel === 'medium').length;
+    const highCount = students.filter((s) => s.riskLevel === 'high').length;
+
+    return [
+      { name: '安全', value: Math.round((safeCount / total) * 1000) / 10 },
+      { name: '低风险', value: Math.round((lowCount / total) * 1000) / 10 },
+      { name: '中风险', value: Math.round((mediumCount / total) * 1000) / 10 },
+      { name: '高风险', value: Math.round((highCount / total) * 1000) / 10 },
+    ];
+  }, [students]);
+
+  const rankData = useMemo((): BarDataItem[] => {
+    return schools
+      .sort((a, b) => b.resolutionRate - a.resolutionRate)
+      .slice(0, 10)
+      .map((s) => ({
+        name: s.name,
+        value: Math.round(s.resolutionRate * 100),
+        extra: {
+          handleRate: Math.round(s.resolutionRate * 100),
+          avgDuration: `${s.avgResponseHours.toFixed(1)}h`,
+        },
+      }));
+  }, [schools]);
+
+  const trendData = useMemo(() => {
+    const dates = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return `${d.getMonth() + 1}/${d.getDate()}`;
+    });
+
+    const level1Data = Array.from({ length: 7 }, () => Math.floor(Math.random() * 60) + 20);
+    const level2Data = Array.from({ length: 7 }, () => Math.floor(Math.random() * 120) + 80);
+
+    return {
+      dates,
+      series: [
+        { name: '一级预警', data: level1Data },
+        { name: '二级预警', data: level2Data },
+      ] as LineSeries[],
+    };
+  }, [warnings.length]);
+
+  const warningStream = useMemo(() => {
+    const levels: Array<'low' | 'medium' | 'high' | 'critical'> = ['low', 'medium', 'high', 'critical'];
+    const triggerTypes = ['情绪低落', '心理测评', '社交异常', '行为异常', '学业预警', '睡眠监测'];
+
+    return warnings.slice(0, 10).map((w, i) => {
+      const minutesAgo = Math.floor(Math.random() * 180) + 1;
+      const hours = Math.floor(minutesAgo / 60);
+      const mins = minutesAgo % 60;
+      return {
+        id: w.id,
+        studentName: w.studentName,
+        school: w.schoolName,
+        level: levels[i % levels.length],
+        triggerType: triggerTypes[i % triggerTypes.length],
+        time: hours > 0 ? `${hours}小时${mins}分钟前` : `${mins}分钟前`,
+      };
+    });
+  }, [warnings]);
+
+  const highRiskSchools = useMemo(() => {
+    return schools
+      .sort((a, b) => b.warningCount - a.warningCount)
+      .slice(0, 8)
+      .map((s, i) => ({
+        id: s.id,
+        name: s.name,
+        province: s.province,
+        highRiskCount: Math.floor(s.warningCount * 0.3),
+        resolutionRate: Math.round(s.resolutionRate * 100),
+        trend: Array.from({ length: 7 }, () => Math.floor(Math.random() * 50) + 30),
+      }));
+  }, [schools]);
+
   const riskColors = ['#2EC4B6', '#74C0FC', '#FFA94D', '#FF6B6B'];
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoaded(true), 100);
+    initializeData();
+    const timer = setTimeout(() => setLoaded(true), 300);
     return () => clearTimeout(timer);
-  }, []);
+  }, [initializeData]);
+
+  const handleProvinceClick = (province: ProvinceRiskData) => {
+    if (scope?.type === 'national' || scope?.type === 'province') {
+      setSelectedProvince(province.name);
+    }
+  };
+
+  const handleRiskPieClick = (item: PieDataItem) => {
+    const riskLevelMap: Record<string, string> = {
+      '安全': 'safe',
+      '低风险': 'low',
+      '中风险': 'medium',
+      '高风险': 'high',
+    };
+    const riskLevel = riskLevelMap[item.name];
+    if (riskLevel) {
+      setWarningFilter({ riskLevel });
+      navigate('/warning');
+    }
+  };
+
+  const handleRankItemClick = (item: BarDataItem) => {
+    const school = schools.find((s) => s.name === item.name);
+    if (school) {
+      navigate(`/dashboard/school/${school.id}`);
+    }
+  };
 
   const handleRefresh = () => {
     if (refreshing) return;
@@ -327,41 +485,41 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
           <StatCard
-            title="全国监测学生数"
-            value="41,805,260"
+            title={effectiveProvince ? `${effectiveProvince}监测学生数` : '全国监测学生数'}
+            value={formatNumber(kpiData.totalStudents)}
             suffix="人"
-            trendValue="+2.3%"
-            trendType="up"
+            trendValue={`${kpiData.totalStudentsYoY >= 0 ? '+' : ''}${(kpiData.totalStudentsYoY * 100).toFixed(1)}%`}
+            trendType={kpiData.totalStudentsYoY >= 0 ? 'up' : 'down'}
             description="同比去年"
             color="primary"
             icon={<Users className="w-6 h-6" strokeWidth={2} />}
           />
           <StatCard
             title="风险学生数"
-            value="186,492"
+            value={formatNumber(kpiData.riskStudents)}
             suffix="人"
-            trendValue="-5.1%"
-            trendType="down"
+            trendValue={`${kpiData.riskStudentsYoY >= 0 ? '+' : ''}${(kpiData.riskStudentsYoY * 100).toFixed(1)}%`}
+            trendType={kpiData.riskStudentsYoY >= 0 ? 'up' : 'down'}
             description="同比去年"
             color="danger"
             icon={<AlertTriangle className="w-6 h-6" strokeWidth={2} />}
           />
           <StatCard
             title="预警处置率"
-            value="94.7"
+            value={(kpiData.resolutionRate * 100).toFixed(1)}
             suffix="%"
-            trendValue="+3.2%"
-            trendType="up"
+            trendValue={`${kpiData.resolutionRateYoY >= 0 ? '+' : ''}${(kpiData.resolutionRateYoY * 100).toFixed(1)}%`}
+            trendType={kpiData.resolutionRateYoY >= 0 ? 'up' : 'down'}
             description="同比去年"
             color="mint"
             icon={<CheckCircle2 className="w-6 h-6" strokeWidth={2} />}
           />
           <StatCard
             title="平均响应时长"
-            value="6.2"
+            value={kpiData.avgResponseHours.toFixed(1)}
             suffix="小时"
-            trendValue="-1.8小时"
-            trendType="down"
+            trendValue={`${kpiData.avgResponseHoursYoY >= 0 ? '+' : ''}${(kpiData.avgResponseHoursYoY * 100).toFixed(1)}%`}
+            trendType={kpiData.avgResponseHoursYoY <= 0 ? 'down' : 'up'}
             description="同比去年"
             color="warning"
             icon={<Clock className="w-6 h-6" strokeWidth={2} />}
@@ -372,9 +530,7 @@ export default function DashboardPage() {
           <div className="xl:col-span-7">
             <ChinaHeatMap
               data={provinceData}
-              onProvinceClick={(p) => {
-                console.log('Selected province:', p.name);
-              }}
+              onProvinceClick={handleProvinceClick}
             />
           </div>
 
@@ -398,6 +554,7 @@ export default function DashboardPage() {
                     title: `${riskPieData.reduce((s, i) => s + i.value, 0).toFixed(0)}%`,
                     subtitle: '学生心理健康',
                   }}
+                  onItemClick={handleRiskPieClick}
                 />
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   {riskPieData.map((item, idx) => (
@@ -500,6 +657,7 @@ export default function DashboardPage() {
                   height={440}
                   xAxisName="处置率 (%)"
                   showRank={true}
+                  onItemClick={handleRankItemClick}
                 />
               </CardContent>
             </Card>

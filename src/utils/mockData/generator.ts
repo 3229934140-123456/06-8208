@@ -690,6 +690,7 @@ export function generateWarnings(
       approved: '已审批',
       resolved: '已解决',
       rejected: '已驳回',
+      escalating: '升级中',
     };
 
     const approvalStage: 0 | 1 | 2 | 3 =
